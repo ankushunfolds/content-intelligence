@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import Boolean, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
@@ -64,15 +64,24 @@ def _add_missing_columns() -> None:
 
 
 def _default_for(column) -> str:
+    # Postgres has a real boolean type and rejects `DEFAULT 0`/`DEFAULT 1` for
+    # it ("column is of type boolean but default expression is of type
+    # integer") — it needs the literal TRUE/FALSE. SQLite accepts both forms,
+    # so using the boolean literal here works on both backends rather than
+    # only the SQLite default this used to be written for.
+    is_boolean_column = isinstance(column.type, Boolean)
+
     if column.default is not None and getattr(column.default, "arg", None) is not None:
         arg = column.default.arg
         if isinstance(arg, bool):
-            return f"DEFAULT {1 if arg else 0}"
+            return f"DEFAULT {'TRUE' if arg else 'FALSE'}"
         if isinstance(arg, (int, float)):
             return f"DEFAULT {arg}"
         if isinstance(arg, str):
             return f"DEFAULT '{arg}'"
-    return "" if column.nullable else "DEFAULT 0"
+    if column.nullable:
+        return ""
+    return "DEFAULT FALSE" if is_boolean_column else "DEFAULT 0"
 
 
 def init_db() -> None:
