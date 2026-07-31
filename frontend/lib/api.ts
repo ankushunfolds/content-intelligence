@@ -83,7 +83,13 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
 
-  me: () => request<{ id: number; email: string; niche: string | null }>("/auth/me"),
+  me: () =>
+    request<{ id: number; email: string; niche: string | null; is_verified: boolean }>("/auth/me"),
+
+  resendVerification: () => request<{ message: string }>("/auth/resend-verification", { method: "POST" }),
+
+  verifyEmail: (token: string) =>
+    request<{ message: string }>(`/auth/verify?token=${encodeURIComponent(token)}`),
 
   onboarding: (own_channel: string, competitors: string[], niche?: string) =>
     request<TrackedChannel[]>("/channels/onboarding", {

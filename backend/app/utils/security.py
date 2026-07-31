@@ -49,6 +49,37 @@ def create_token(user_id: int) -> str:
 
 def decode_token(token: str) -> int | None:
     """Return the user id, or None if the token is malformed, forged, or expired."""
+    payload = _decode_signed(token)
+    if payload is None or payload.get("purpose") is not None:
+        # A verify-email token carries a "purpose" claim (see below) so it
+        # can never be replayed as a login/auth token, and vice versa.
+        return None
+    return int(payload["sub"])
+
+
+_VERIFY_TOKEN_TTL_HOURS = 24
+
+
+def create_verify_token(user_id: int) -> str:
+    payload = {
+        "sub": user_id,
+        "purpose": "verify_email",
+        "exp": int(time.time()) + _VERIFY_TOKEN_TTL_HOURS * 3600,
+    }
+    body = _b64(json.dumps(payload, separators=(",", ":")).encode())
+    signature = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
+    return f"{body}.{_b64(signature)}"
+
+
+def decode_verify_token(token: str) -> int | None:
+    """Return the user id from a verify-email token, or None if invalid/expired/wrong purpose."""
+    payload = _decode_signed(token)
+    if payload is None or payload.get("purpose") != "verify_email":
+        return None
+    return int(payload["sub"])
+
+
+def _decode_signed(token: str) -> dict | None:
     try:
         body, signature = token.split(".")
     except ValueError:
@@ -62,4 +93,4 @@ def decode_token(token: str) -> int | None:
         return None
     if payload.get("exp", 0) < time.time():
         return None
-    return int(payload["sub"])
+    return payload

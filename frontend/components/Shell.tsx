@@ -18,6 +18,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
+  const [isVerified, setIsVerified] = useState(true);
 
   useEffect(() => {
     if (!getToken()) {
@@ -26,7 +27,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
     }
     api
       .me()
-      .then((user) => setEmail(user.email))
+      .then((user) => {
+        setEmail(user.email);
+        setIsVerified(user.is_verified);
+      })
       .catch(() => {
         setToken(null);
         router.replace("/");
@@ -82,7 +86,44 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
+      {!isVerified ? <VerifyBanner /> : null}
+
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+    </div>
+  );
+}
+
+function VerifyBanner() {
+  const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function resend() {
+    setStatus("sending");
+    try {
+      await api.resendVerification();
+      setStatus("sent");
+    } catch {
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="border-b border-amber-900/40 bg-amber-950/40">
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-6 py-2.5 text-xs text-amber-200">
+        <span>
+          {status === "sent"
+            ? "Verification email sent — check your inbox."
+            : "Please verify your email address to make sure you don't lose access to your account."}
+        </span>
+        {status !== "sent" ? (
+          <button
+            onClick={resend}
+            disabled={status === "sending"}
+            className="rounded-md border border-amber-800/60 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-900/40 disabled:opacity-60"
+          >
+            {status === "sending" ? "Sending…" : status === "error" ? "Try again" : "Resend email"}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

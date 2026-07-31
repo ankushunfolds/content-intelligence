@@ -12,6 +12,7 @@ pydantic[email]>=2.10.4
 httpx>=0.28.1
 python-dotenv>=1.0.1
 pytest>=8.3.4
+dnspython>=2.6.1
 
 # Postgres and Redis are optional — see requirements-optional.txt.
 # The app defaults to SQLite and runs the worker without a broker.

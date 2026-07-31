@@ -28,9 +28,14 @@ class UserOut(BaseModel):
     id: int
     email: str
     niche: str | None
+    is_verified: bool
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MessageResponse(BaseModel):
+    message: str
 
 
 # --- Channels ---

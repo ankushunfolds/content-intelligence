@@ -82,6 +82,19 @@ class Settings:
             o.strip() for o in _env("CORS_ORIGINS", "http://localhost:3000").split(",") if o.strip()
         ]
 
+        # --- Email (verification) ---
+        # Brevo (formerly Sendinblue) transactional email API. Free tier is
+        # generous enough for a beta cohort — see services/email.py.
+        self.brevo_api_key: str = _env("BREVO_API_KEY", "")
+        self.brevo_sender_email: str = _env("BREVO_SENDER_EMAIL", "no-reply@contentintelligence.app")
+        self.brevo_sender_name: str = _env("BREVO_SENDER_NAME", "Content Intelligence")
+        # Where verification links point. Must be the frontend's public URL.
+        self.frontend_url: str = _env("FRONTEND_URL", "http://localhost:3000")
+        # False during the initial beta: unverified users can still use the
+        # product, they just see a banner. Flip to True once Brevo is
+        # confirmed working end-to-end and you want a hard gate.
+        self.require_email_verification: bool = _env("REQUIRE_EMAIL_VERIFICATION", "false").lower() == "true"
+
     @property
     def using_real_youtube(self) -> bool:
         return self.youtube_provider == "youtube" and bool(self.youtube_api_key)
