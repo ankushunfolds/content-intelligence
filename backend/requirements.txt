@@ -1,0 +1,17 @@
+# Minimum bounds, not exact pins.
+#
+# Exact pins break on new Python releases: a version pinned today has no
+# pre-built wheel for a Python that ships next year, so pip falls back to
+# compiling from source and needs a C/Rust toolchain you shouldn't need.
+# Lower bounds let pip pick a release that has a wheel for your interpreter.
+
+fastapi>=0.115.6
+uvicorn>=0.34.0
+sqlalchemy>=2.0.36
+pydantic[email]>=2.10.4
+httpx>=0.28.1
+python-dotenv>=1.0.1
+pytest>=8.3.4
+
+# Postgres and Redis are optional — see requirements-optional.txt.
+# The app defaults to SQLite and runs the worker without a broker.

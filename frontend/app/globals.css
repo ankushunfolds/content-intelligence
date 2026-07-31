@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-ink-950 text-neutral-200 antialiased;
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-ink-700 bg-ink-900;
+  }
+
+  .panel-hover {
+    @apply transition-colors hover:border-ink-600 hover:bg-ink-800;
+  }
+
+  /* Section headers: quiet, uppercase, get out of the way of the data. */
+  .eyebrow {
+    @apply text-[11px] font-semibold uppercase tracking-[0.14em] text-neutral-500;
+  }
+
+  .chip {
+    @apply inline-flex items-center rounded-md border border-ink-700 bg-ink-800 px-2 py-0.5 text-xs text-neutral-400;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-signal text-ink-950 hover:bg-signal-soft;
+  }
+
+  .btn-ghost {
+    @apply btn border border-ink-700 text-neutral-300 hover:border-ink-600 hover:text-white;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2.5 text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-signal focus:outline-none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-ink-700;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -1,0 +1,7 @@
+# Railway (and other Nixpacks-based platforms) build from this automatically.
+#
+# requirements-optional.txt (psycopg3 + redis) is deliberately NOT in the base
+# requirements.txt — see that file's comment. In production you're on Postgres,
+# so both files are installed here.
+[phases.install]
+cmds = ["pip install -r requirements.txt -r requirements-optional.txt"]

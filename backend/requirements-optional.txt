@@ -1,0 +1,14 @@
+# Only needed when you move off the defaults.
+#
+#   pip install -r requirements-optional.txt
+#
+# psycopg (v3) rather than psycopg2-binary: v2 has no wheels for recent Python
+# versions and compiling it requires a local PostgreSQL install (pg_config).
+# With psycopg3 the connection string becomes:
+#
+#   DATABASE_URL=postgresql+psycopg://ci:ci@localhost:5432/content_intelligence
+
+psycopg[binary]>=3.2
+
+# Redis is used only as a worker lock, so a single worker doesn't need it.
+redis>=5.2.1
