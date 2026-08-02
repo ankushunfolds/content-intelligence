@@ -3,7 +3,7 @@ from __future__ import annotations
 import hmac
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -58,7 +58,8 @@ def stats(db: Session = Depends(get_db), _: User = Depends(require_admin)) -> di
 
 @router.get("/health-summary")
 def health_summary(
-    key: str,
+    key: str | None = None,
+    x_monitor_key: str | None = Header(default=None),
     hours: int = Query(24, le=168),
     db: Session = Depends(get_db),
 ) -> dict:
@@ -68,11 +69,17 @@ def health_summary(
 
     404s rather than 401/403 on a bad or missing key so the endpoint doesn't
     announce its own existence to anything scanning for admin routes.
+
+    Prefer the `X-Monitor-Key` header over `?key=`: query strings get written
+    verbatim into web-server and platform access logs, so a secret passed that
+    way ends up sitting in plaintext in log storage. The query parameter is
+    still accepted so existing checks don't break.
     """
+    supplied = x_monitor_key or key or ""
     # compare_digest rather than `!=`: a plain string comparison returns as
     # soon as it hits a differing byte, so response time leaks how much of the
     # key a guess got right, which is enough to recover it byte by byte.
-    if not settings.admin_monitor_key or not hmac.compare_digest(key, settings.admin_monitor_key):
+    if not settings.admin_monitor_key or not hmac.compare_digest(supplied, settings.admin_monitor_key):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
     since = utcnow() - timedelta(hours=hours)
