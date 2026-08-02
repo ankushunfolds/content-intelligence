@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -68,7 +69,10 @@ def health_summary(
     404s rather than 401/403 on a bad or missing key so the endpoint doesn't
     announce its own existence to anything scanning for admin routes.
     """
-    if not settings.admin_monitor_key or key != settings.admin_monitor_key:
+    # compare_digest rather than `!=`: a plain string comparison returns as
+    # soon as it hits a differing byte, so response time leaks how much of the
+    # key a guess got right, which is enough to recover it byte by byte.
+    if not settings.admin_monitor_key or not hmac.compare_digest(key, settings.admin_monitor_key):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
     since = utcnow() - timedelta(hours=hours)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,9 +14,19 @@ from app.schemas import RefreshResponse
 from app.services import briefing, pipeline
 from app.services.trends import top_trends
 from app.utils.format import compact_number, multiplier, percent
+from app.utils.rate_limit import enforce_rate_limit
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/intelligence", tags=["intelligence"])
+
+# Refresh is by far the most expensive thing a user can trigger: it re-ingests
+# every tracked channel from the YouTube Data API and sends every unclassified
+# video to the LLM. Both are metered and both cost real money. Without a limit,
+# one person leaning on the Refresh button can drain the day's quota for
+# everybody — the daily scheduled job already keeps data fresh, so this exists
+# for impatience, not necessity. Keyed per user rather than per IP so one
+# person on a shared network can't lock everyone else out.
+_REFRESH_LIMIT = {"max_attempts": 5, "window_seconds": 3600}
 
 
 @router.get("/today")
@@ -73,6 +83,11 @@ def today(db: Session = Depends(get_db), user: User = Depends(current_user)) -> 
 
 
 @router.post("/refresh", response_model=RefreshResponse)
-def refresh(db: Session = Depends(get_db), user: User = Depends(current_user)) -> RefreshResponse:
+def refresh(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(current_user),
+) -> RefreshResponse:
     """Run the whole pipeline now: ingest → score → classify → trends → brief."""
+    enforce_rate_limit(request, "refresh", identifier=f"user:{user.id}", **_REFRESH_LIMIT)
     return RefreshResponse(**pipeline.run_pipeline(db, user.id))

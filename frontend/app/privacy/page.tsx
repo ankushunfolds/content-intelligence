@@ -54,7 +54,7 @@ export default function PrivacyPage() {
         </li>
         <li>
           <span className="font-medium text-neutral-200">Brevo</span> — to send account emails
-          (currently just email verification).
+          (email verification and password resets).
         </li>
       </ul>
       <p className="mt-3">We don&apos;t sell your data, and we don&apos;t share it for advertising.</p>

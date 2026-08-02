@@ -10,6 +10,13 @@ def _env(key: str, default: str) -> str:
     return default if value is None or value == "" else value
 
 
+# Sentinel so the startup check can recognise "nobody set a real one". Every
+# auth, email-verification and password-reset token is signed with the secret
+# key, so if this placeholder is ever live in production anyone who reads this
+# repo can mint a valid session for any account.
+DEV_SECRET_KEY = "dev-secret-change-me"
+
+
 def _normalize_db_url(url: str) -> str:
     """Railway, Render, Heroku etc. inject a bare `postgres://` or `postgresql://`
     DSN with no driver name. SQLAlchemy needs the driver explicit (we use
@@ -32,7 +39,7 @@ class Settings:
         # --- Core ---
         self.app_name: str = "Content Intelligence"
         self.env: str = _env("APP_ENV", "development")
-        self.secret_key: str = _env("SECRET_KEY", "dev-secret-change-me")
+        self.secret_key: str = _env("SECRET_KEY", DEV_SECRET_KEY)
         self.token_ttl_hours: int = int(_env("TOKEN_TTL_HOURS", "720"))
 
         # --- Database ---
@@ -69,6 +76,12 @@ class Settings:
 
         # --- Limits ---
         self.max_competitors: int = int(_env("MAX_COMPETITORS", "10"))
+        # Ceiling on how many videos one pipeline run will send to the LLM.
+        # Onboarding with 10 channels can surface 400+ unclassified videos at
+        # once, which is 20+ LLM calls in a single request — enough to trip a
+        # free-tier quota on the very first run. Anything left over is picked
+        # up by the next run, so nothing is lost, it just arrives later.
+        self.max_classify_per_run: int = int(_env("MAX_CLASSIFY_PER_RUN", "120"))
 
         # --- Admin ---
         # Emails in this list get is_admin=True the moment they sign up. Empty by
@@ -101,6 +114,29 @@ class Settings:
         # session. Empty by default: the endpoint 404s until you set this,
         # same "opt-in by setting a var" pattern as ADMIN_EMAILS.
         self.admin_monitor_key: str = _env("ADMIN_MONITOR_KEY", "")
+
+    @property
+    def is_production(self) -> bool:
+        return self.env.lower() in {"production", "prod"}
+
+    def startup_problems(self) -> list[str]:
+        """Misconfigurations that are dangerous in production.
+
+        Returned rather than raised so the caller decides how loud to be: fatal
+        in production, a warning locally (where the dev defaults are the point).
+        """
+        problems: list[str] = []
+        if self.secret_key == DEV_SECRET_KEY:
+            problems.append(
+                "SECRET_KEY is still the built-in development value — every session, "
+                "email-verification and password-reset token is forgeable. Set SECRET_KEY."
+            )
+        if any(o == "*" for o in self.cors_origins):
+            problems.append(
+                "CORS_ORIGINS is '*' while credentials are allowed — any site could call "
+                "the API with a logged-in user's browser. Set it to the frontend's URL."
+            )
+        return problems
 
     @property
     def using_real_youtube(self) -> bool:

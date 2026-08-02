@@ -12,6 +12,7 @@ from time import perf_counter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import Channel, TrackedChannel
 from app.services import briefing, classification, ingestion, performance, trends
 from app.services.youtube import YouTubeProvider, get_provider
@@ -59,8 +60,10 @@ def run_pipeline(
     # 2. SIGNALS — deterministic performance maths (must precede trends).
     perf_result = performance.score_channels(db, channels)
 
-    # 3. INTELLIGENCE — semantic classification, only for unclassified videos.
-    classified = classification.classify_pending(db, channels)
+    # 3. INTELLIGENCE — semantic classification, only for unclassified videos,
+    #    and capped per run so one big onboarding can't burn a day's LLM quota
+    #    in a single request. The remainder is picked up next run.
+    classified = classification.classify_pending(db, channels, limit=settings.max_classify_per_run)
 
     # 4. TREND ENGINE — aggregate classified + scored videos.
     detected = trends.compute_trends(db, user_id)

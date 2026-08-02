@@ -10,6 +10,25 @@ body {
   @apply bg-ink-950 text-neutral-200 antialiased;
 }
 
+@layer base {
+  /* Grid and flex children default to `min-width: auto`, which means they
+     refuse to shrink below their content's intrinsic minimum width. A single
+     long, unbreakable run of content (a video title set to `truncate`, a wide
+     stats row) therefore widens the whole column instead of being clipped —
+     which is what pushed cards past the screen edge on narrow phones.
+     Measured on a real 360px viewport: the dashboard overflowed by 34px and
+     the trends page by 190px; this rule takes both to exactly 0.
+
+     Deliberately in `base`, not unlayered: utilities must still win, so an
+     explicit `min-w-4` (the momentum bars) keeps its floor instead of being
+     flattened to zero by this. `shrink-0` is unaffected either way —
+     flex-shrink is a separate property. */
+  .grid > *,
+  .flex > * {
+    min-width: 0;
+  }
+}
+
 @layer components {
   .panel {
     @apply rounded-xl border border-ink-700 bg-ink-900;
