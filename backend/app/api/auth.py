@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +14,7 @@ from app.schemas import LoginRequest, MessageResponse, SignupRequest, TokenRespo
 from app.services.email import EmailError, send_verification_email
 from app.utils.email_validation import validate_signup_email
 from app.utils.logging import logger
+from app.utils.rate_limit import enforce_rate_limit
 from app.utils.security import create_token, create_verify_token, decode_verify_token, hash_password, verify_password
 from app.utils.time import utcnow
 
@@ -22,6 +23,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Re-requesting a verification email more often than this just burns Brevo's
 # free-tier quota for no benefit — the previous link is still valid.
 _RESEND_COOLDOWN = timedelta(seconds=60)
+
+# Generous enough that a real person fumbling their password a few times, or
+# a beta tester signing up two accounts, never notices. Tight enough to stop
+# scripted spam. Per-IP, so it doesn't penalize other users behind the same
+# NAT/office network beyond this window.
+_SIGNUP_LIMIT = {"max_attempts": 5, "window_seconds": 600}
+_LOGIN_LIMIT = {"max_attempts": 10, "window_seconds": 600}
 
 
 def _send_verification(user: User, db: Session) -> None:
@@ -38,7 +46,8 @@ def _send_verification(user: User, db: Session) -> None:
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    enforce_rate_limit(request, "signup", **_SIGNUP_LIMIT)
     email = payload.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status.HTTP_409_CONFLICT, "An account with that email already exists")
@@ -67,7 +76,8 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)) -> TokenRespon
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    enforce_rate_limit(request, "login", **_LOGIN_LIMIT)
     user = db.scalar(select(User).where(User.email == payload.email.lower()))
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")

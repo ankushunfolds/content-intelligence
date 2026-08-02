@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken, setToken } from "@/lib/api";
@@ -118,10 +119,15 @@ export default function LandingPage() {
       </div>
 
       <footer className="border-t border-ink-800 px-6 py-5">
-        <p className="mx-auto max-w-6xl text-xs text-neutral-700">
-          Every recommendation is computed from your tracked channels&apos; real data. The AI explains
-          the numbers — it never invents them.
-        </p>
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-neutral-700">
+            Every recommendation is computed from your tracked channels&apos; real data. The AI
+            explains the numbers — it never invents them.
+          </p>
+          <Link href="/privacy" className="text-xs text-neutral-700 hover:text-neutral-400">
+            Privacy
+          </Link>
+        </div>
       </footer>
     </div>
   );

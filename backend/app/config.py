@@ -95,6 +95,13 @@ class Settings:
         # confirmed working end-to-end and you want a hard gate.
         self.require_email_verification: bool = _env("REQUIRE_EMAIL_VERIFICATION", "false").lower() == "true"
 
+        # --- Monitoring ---
+        # Shared secret for GET /admin/health-summary — lets an external
+        # scheduled check read error counts without a logged-in admin
+        # session. Empty by default: the endpoint 404s until you set this,
+        # same "opt-in by setting a var" pattern as ADMIN_EMAILS.
+        self.admin_monitor_key: str = _env("ADMIN_MONITOR_KEY", "")
+
     @property
     def using_real_youtube(self) -> bool:
         return self.youtube_provider == "youtube" and bool(self.youtube_api_key)
