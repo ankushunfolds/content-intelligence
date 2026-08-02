@@ -4,7 +4,33 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, getToken } from "@/lib/api";
 
-const NICHES = ["AI / Technology", "Business", "Creator Education", "Productivity", "Finance", "Gaming"];
+const NICHES = [
+  "AI / Technology",
+  "Business",
+  "Creator Education",
+  "Productivity",
+  "Finance",
+  "Gaming",
+  "Marketing",
+  "Personal Development",
+  "Health & Fitness",
+  "Cooking / Food",
+  "Travel",
+  "Beauty & Fashion",
+  "Education / Study",
+  "Parenting & Family",
+  "DIY / Home",
+  "Sports",
+  "Music",
+  "Entertainment / Pop Culture",
+  "News & Commentary",
+  "Science",
+  "Real Estate",
+  "Automotive",
+  "Comedy",
+  "Art & Design",
+  "Other",
+];
 
 /** Section 6: ask for exactly three things. Nothing more. */
 export default function OnboardingPage() {

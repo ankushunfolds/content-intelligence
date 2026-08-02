@@ -74,3 +74,27 @@ def send_verification_email(to_email: str, token: str) -> None:
     </div>
     """
     _send(to_email, "Verify your Content Intelligence account", html)
+
+
+def send_password_reset_email(to_email: str, token: str) -> None:
+    reset_url = f"{settings.frontend_url.rstrip('/')}/reset-password?token={token}"
+    html = f"""
+    <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto;">
+      <h2 style="color: #111;">Reset your password</h2>
+      <p style="color: #444; line-height: 1.5;">
+        We received a request to reset the password on your Content Intelligence account.
+      </p>
+      <p style="margin: 24px 0;">
+        <a href="{reset_url}"
+           style="background: #111; color: #fff; padding: 12px 20px; border-radius: 6px;
+                  text-decoration: none; font-weight: 600;">
+          Reset password
+        </a>
+      </p>
+      <p style="color: #888; font-size: 12px;">
+        This link expires in 1 hour. If you didn't request this, you can safely ignore this email —
+        your password won't change.
+      </p>
+    </div>
+    """
+    _send(to_email, "Reset your Content Intelligence password", html)

@@ -6,6 +6,7 @@ dependencies, no bcrypt build step, and swappable for real JWT later.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -79,17 +80,49 @@ def decode_verify_token(token: str) -> int | None:
     return int(payload["sub"])
 
 
+_RESET_TOKEN_TTL_HOURS = 1
+
+
+def create_reset_token(user_id: int, password_hash: str) -> str:
+    """The current password hash is folded into the payload so that once a
+    reset link is used (or the password is changed any other way), the old
+    token stops decoding — the hash it was signed against no longer matches,
+    so it can't be replayed even though it hasn't technically expired yet.
+    """
+    payload = {
+        "sub": user_id,
+        "purpose": "reset_password",
+        "pwd": password_hash[-16:],
+        "exp": int(time.time()) + _RESET_TOKEN_TTL_HOURS * 3600,
+    }
+    body = _b64(json.dumps(payload, separators=(",", ":")).encode())
+    signature = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
+    return f"{body}.{_b64(signature)}"
+
+
+def decode_reset_token(token: str, current_password_hash: str) -> int | None:
+    """Return the user id from a reset-password token, or None if invalid,
+    expired, wrong purpose, or already consumed (password changed since)."""
+    payload = _decode_signed(token)
+    if payload is None or payload.get("purpose") != "reset_password":
+        return None
+    if payload.get("pwd") != current_password_hash[-16:]:
+        return None
+    return int(payload["sub"])
+
+
 def _decode_signed(token: str) -> dict | None:
     try:
         body, signature = token.split(".")
-    except ValueError:
-        return None
-    expected = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
-    if not hmac.compare_digest(_unb64(signature), expected):
-        return None
-    try:
+        expected = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
+        if not hmac.compare_digest(_unb64(signature), expected):
+            return None
         payload = json.loads(_unb64(body))
-    except (ValueError, json.JSONDecodeError):
+    except (ValueError, TypeError, json.JSONDecodeError, binascii.Error):
+        # Any malformed input (bad base64, wrong segment count, non-JSON body,
+        # etc.) is just an invalid token — not a server error. A user pasting
+        # a truncated link or a bot fuzzing the endpoint should get a clean
+        # 400 from the caller, not a 500.
         return None
     if payload.get("exp", 0) < time.time():
         return None

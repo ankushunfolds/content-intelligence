@@ -12,6 +12,7 @@ export default function LandingPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [agreed, setAgreed] = useState(false);
 
   useEffect(() => {
     if (getToken()) router.replace("/dashboard");
@@ -98,12 +99,38 @@ export default function LandingPage() {
                 autoComplete={mode === "signup" ? "new-password" : "current-password"}
               />
 
+              {mode === "signup" ? (
+                <label className="flex items-start gap-2 text-xs leading-relaxed text-neutral-500">
+                  <input
+                    type="checkbox"
+                    required
+                    checked={agreed}
+                    onChange={(e) => setAgreed(e.target.checked)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span>
+                    This is a private beta. I agree to keep the product, its features, and any
+                    materials shared with me confidential, and not to share screenshots, access, or
+                    details publicly without permission.
+                  </span>
+                </label>
+              ) : null}
+
               {error ? <p className="text-sm text-fall">{error}</p> : null}
 
-              <button type="submit" disabled={busy} className="btn-primary w-full">
+              <button type="submit" disabled={busy || (mode === "signup" && !agreed)} className="btn-primary w-full">
                 {busy ? "Working…" : mode === "signup" ? "Start Tracking" : "Sign in"}
               </button>
             </form>
+
+            {mode === "login" ? (
+              <Link
+                href="/forgot-password"
+                className="mt-3 block text-center text-xs text-neutral-600 hover:text-neutral-400"
+              >
+                Forgot password?
+              </Link>
+            ) : null}
 
             <button
               onClick={() => {

@@ -10,12 +10,29 @@ from app.api.deps import current_user
 from app.config import settings
 from app.db import get_db
 from app.models import User
-from app.schemas import LoginRequest, MessageResponse, SignupRequest, TokenResponse, UserOut
-from app.services.email import EmailError, send_verification_email
+from app.schemas import (
+    ForgotPasswordRequest,
+    LoginRequest,
+    MessageResponse,
+    ResetPasswordRequest,
+    SignupRequest,
+    TokenResponse,
+    UserOut,
+)
+from app.services.email import EmailError, send_password_reset_email, send_verification_email
 from app.utils.email_validation import validate_signup_email
 from app.utils.logging import logger
 from app.utils.rate_limit import enforce_rate_limit
-from app.utils.security import create_token, create_verify_token, decode_verify_token, hash_password, verify_password
+from app.utils.security import (
+    _decode_signed,
+    create_reset_token,
+    create_token,
+    create_verify_token,
+    decode_reset_token,
+    decode_verify_token,
+    hash_password,
+    verify_password,
+)
 from app.utils.time import utcnow
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -30,6 +47,9 @@ _RESEND_COOLDOWN = timedelta(seconds=60)
 # NAT/office network beyond this window.
 _SIGNUP_LIMIT = {"max_attempts": 5, "window_seconds": 600}
 _LOGIN_LIMIT = {"max_attempts": 10, "window_seconds": 600}
+# Same shape as signup: generous for a real person, tight enough to stop
+# someone hammering the endpoint to spam another person's inbox.
+_RESET_REQUEST_LIMIT = {"max_attempts": 5, "window_seconds": 600}
 
 
 def _send_verification(user: User, db: Session) -> None:
@@ -118,3 +138,49 @@ def resend_verification(user: User = Depends(current_user), db: Session = Depend
 
     _send_verification(user, db)
     return MessageResponse(message="Verification email sent")
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+def forgot_password(payload: ForgotPasswordRequest, request: Request, db: Session = Depends(get_db)) -> MessageResponse:
+    enforce_rate_limit(request, "forgot-password", **_RESET_REQUEST_LIMIT)
+    user = db.scalar(select(User).where(User.email == payload.email.lower()))
+    # Always return the same message whether or not the account exists —
+    # otherwise this endpoint becomes a way to check who has an account here.
+    generic = MessageResponse(message="If that email has an account, a reset link is on its way")
+    if user is None:
+        return generic
+
+    token = create_reset_token(user.id, user.password_hash)
+    try:
+        send_password_reset_email(user.email, token)
+    except EmailError as exc:
+        logger.warning("password reset email to %s failed: %s", user.email, exc)
+    return generic
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+def reset_password(payload: ResetPasswordRequest, db: Session = Depends(get_db)) -> MessageResponse:
+    # Decoding requires the user's *current* password hash, so we have to try
+    # every candidate the token's signature could belong to — but the token
+    # itself carries no plaintext email, only a signed user id once decoded.
+    # Simplest correct approach: decode the outer signature first (cheap,
+    # no DB hit needed) to recover the claimed user id, then verify the
+    # embedded password-hash fingerprint against that specific user.
+    from app.utils.security import _decode_signed  # local import: internal helper, not part of the public API
+
+    raw = _decode_signed(payload.token)
+    if raw is None or raw.get("purpose") != "reset_password":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This reset link is invalid or has expired")
+
+    user = db.get(User, int(raw["sub"]))
+    if user is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This reset link is invalid or has expired")
+
+    user_id = decode_reset_token(payload.token, user.password_hash)
+    if user_id is None or user_id != user.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "This reset link is invalid or has expired")
+
+    user.password_hash = hash_password(payload.password)
+    db.add(user)
+    db.commit()
+    return MessageResponse(message="Password updated — you can sign in now")

@@ -91,6 +91,18 @@ export const api = {
   verifyEmail: (token: string) =>
     request<{ message: string }>(`/auth/verify?token=${encodeURIComponent(token)}`),
 
+  forgotPassword: (email: string) =>
+    request<{ message: string }>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, password: string) =>
+    request<{ message: string }>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    }),
+
   onboarding: (own_channel: string, competitors: string[], niche?: string) =>
     request<TrackedChannel[]>("/channels/onboarding", {
       method: "POST",
