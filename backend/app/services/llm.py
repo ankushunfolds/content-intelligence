@@ -192,6 +192,18 @@ class OpenAILLM:
         return _extract_json(response.json()["choices"][0]["message"]["content"])
 
 
+# Google has retired the 2.0 family. Anything named here still gets sent if
+# explicitly configured — the model string is the operator's call, not ours —
+# but it produces a loud warning rather than failing mysteriously months later.
+RETIRED_GEMINI_MODELS = {"gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-3-pro-preview"}
+
+# Used only when the configured model name clearly isn't a Gemini one (e.g. the
+# OpenAI default was left in place). A current stable model, deliberately not a
+# preview: previews carry tighter rate limits and get deprecated on two weeks'
+# notice, which is not what you want quietly underpinning production.
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+
+
 class GeminiLLM:
     name = "gemini"
 
@@ -202,8 +214,23 @@ class GeminiLLM:
 
     def complete_json(self, system: str, user: str, *, model: str | None = None) -> dict[str, Any]:
         model_name = model or settings.llm_classify_model
-        if model_name.startswith("gpt"):  # sensible default if left at the OpenAI value
-            model_name = "gemini-2.0-flash"
+        if not model_name.startswith("gemini"):
+            # The configured name belongs to another provider (or is blank), so
+            # it can't be sent to Gemini as-is.
+            logger.warning(
+                "LLM model %r is not a Gemini model — falling back to %s. Set "
+                "LLM_CLASSIFY_MODEL / LLM_BRIEF_MODEL to Gemini names.",
+                model_name,
+                DEFAULT_GEMINI_MODEL,
+            )
+            model_name = DEFAULT_GEMINI_MODEL
+        if model_name in RETIRED_GEMINI_MODELS:
+            logger.warning(
+                "Gemini model %r has been retired by Google and will stop working. "
+                "Move to a current model such as %s.",
+                model_name,
+                DEFAULT_GEMINI_MODEL,
+            )
         response = httpx.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
             params={"key": self.api_key},
@@ -215,7 +242,11 @@ class GeminiLLM:
             timeout=90.0,
         )
         if response.status_code >= 400:
-            raise LLMError(f"Gemini error {response.status_code}: {response.text[:300]}")
+            # 600 rather than 300 chars: Google's quota errors put the useful
+            # part ("Quota exceeded for metric ... limit ... per day per model")
+            # after the boilerplate, and truncating at 300 cut off exactly the
+            # detail needed to tell which limit was hit.
+            raise LLMError(f"Gemini error {response.status_code}: {response.text[:600]}")
         candidates = response.json().get("candidates") or []
         if not candidates:
             raise LLMError("Gemini returned no candidates")
