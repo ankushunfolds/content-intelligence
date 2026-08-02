@@ -68,17 +68,17 @@ export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunit
               <div className="eyebrow mb-2">Score breakdown</div>
               <div className="space-y-1.5">
                 {Object.entries(score_breakdown || {}).map(([signal, part]) => (
-                  <div key={signal} className="flex items-center gap-3 text-xs">
-                    <span className="w-32 shrink-0 capitalize text-neutral-400">
+                  <div key={signal} className="flex items-center gap-2 text-xs sm:gap-3">
+                    <span className="w-16 shrink-0 truncate capitalize text-neutral-400 sm:w-32">
                       {signal.replace(/_/g, " ")}
                     </span>
-                    <div className="h-1 flex-1 overflow-hidden rounded-full bg-ink-700">
+                    <div className="h-1 min-w-4 flex-1 overflow-hidden rounded-full bg-ink-700">
                       <div
                         className="h-full bg-neutral-500"
                         style={{ width: `${(part.normalised || 0) * 100}%` }}
                       />
                     </div>
-                    <span className="w-24 shrink-0 text-right tabular-nums text-neutral-500">
+                    <span className="hidden shrink-0 text-right tabular-nums text-neutral-500 sm:inline sm:w-24">
                       raw {part.raw}
                     </span>
                     <span className="w-14 shrink-0 text-right tabular-nums text-neutral-300">

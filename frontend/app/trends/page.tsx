@@ -120,17 +120,17 @@ function TrendDetail({ trend, videos }: { trend: Trend; videos: Video[] }) {
           <div className="eyebrow mb-3">How this score was built</div>
           <div className="space-y-2">
             {Object.entries(signals).map(([signal, part]) => (
-              <div key={signal} className="flex items-center gap-3 text-xs">
-                <span className="w-32 shrink-0 capitalize text-neutral-400">
+              <div key={signal} className="flex items-center gap-2 text-xs sm:gap-3">
+                <span className="w-16 shrink-0 truncate capitalize text-neutral-400 sm:w-32">
                   {signal.replace(/_/g, " ")}
                 </span>
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-ink-700">
+                <div className="h-1.5 min-w-4 flex-1 overflow-hidden rounded-full bg-ink-700">
                   <div
                     className="h-full rounded-full bg-neutral-500"
                     style={{ width: `${part.normalised * 100}%` }}
                   />
                 </div>
-                <span className="w-20 shrink-0 text-right tabular-nums text-neutral-600">
+                <span className="hidden shrink-0 text-right tabular-nums text-neutral-600 sm:inline sm:w-20">
                   ×{part.weight}
                 </span>
                 <span className="w-12 shrink-0 text-right tabular-nums text-neutral-200">
@@ -154,31 +154,38 @@ function TrendDetail({ trend, videos }: { trend: Trend; videos: Video[] }) {
 
         <div className="panel mt-3 divide-y divide-ink-800">
           {videos.map((video) => (
-            <div key={video.id} className="flex items-center gap-4 px-4 py-2.5">
-              <span className="w-28 shrink-0 truncate text-xs text-neutral-600">
-                {video.channel_name}
-              </span>
-              <a
-                href={video.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="min-w-0 flex-1 truncate text-sm text-neutral-300 hover:text-white"
-              >
-                {video.title}
-              </a>
-              <span className="w-14 shrink-0 text-right text-xs tabular-nums text-neutral-500">
-                {compact(video.views)}
-              </span>
-              <span
-                className={`w-14 shrink-0 text-right text-xs font-medium tabular-nums ${performanceTone(
-                  video.intelligence?.performance_ratio
-                )}`}
-              >
-                {multiplier(video.intelligence?.performance_ratio)}
-              </span>
-              <span className="hidden w-14 shrink-0 text-right text-xs text-neutral-700 sm:inline">
-                {relativeDate(video.published_at)}
-              </span>
+            <div
+              key={video.id}
+              className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4"
+            >
+              <div className="flex min-w-0 items-center gap-2 sm:contents">
+                <span className="w-16 shrink-0 truncate text-xs text-neutral-600 sm:w-28">
+                  {video.channel_name}
+                </span>
+                <a
+                  href={video.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-w-0 flex-1 truncate text-sm text-neutral-300 hover:text-white"
+                >
+                  {video.title}
+                </a>
+              </div>
+              <div className="flex shrink-0 items-center justify-end gap-3 sm:contents">
+                <span className="w-14 shrink-0 text-right text-xs tabular-nums text-neutral-500">
+                  {compact(video.views)}
+                </span>
+                <span
+                  className={`w-14 shrink-0 text-right text-xs font-medium tabular-nums ${performanceTone(
+                    video.intelligence?.performance_ratio
+                  )}`}
+                >
+                  {multiplier(video.intelligence?.performance_ratio)}
+                </span>
+                <span className="hidden w-14 shrink-0 text-right text-xs text-neutral-700 sm:inline">
+                  {relativeDate(video.published_at)}
+                </span>
+              </div>
             </div>
           ))}
           {!videos.length ? (

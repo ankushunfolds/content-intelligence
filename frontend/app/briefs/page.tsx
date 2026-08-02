@@ -107,14 +107,17 @@ function BriefDetail({ brief }: { brief: Brief }) {
           <SectionHeader icon="📊" title="Rising trends" />
           <div className="panel divide-y divide-ink-800">
             {content.rising_trends.map((trend) => (
-              <div key={trend.trend_id} className="flex items-center gap-4 px-4 py-2.5 text-sm">
+              <div
+                key={trend.trend_id}
+                className="flex items-center gap-2 px-4 py-2.5 text-sm sm:gap-4"
+              >
                 <span className="min-w-0 flex-1 truncate text-neutral-200">
                   {trend.subtopic || trend.topic}
                 </span>
-                <span className="w-16 shrink-0 text-right text-xs tabular-nums text-neutral-500">
+                <span className="hidden shrink-0 text-right text-xs tabular-nums text-neutral-500 sm:inline sm:w-16">
                   {trend.growth}
                 </span>
-                <span className="w-16 shrink-0 text-right text-xs tabular-nums text-neutral-500">
+                <span className="w-12 shrink-0 text-right text-xs tabular-nums text-neutral-500 sm:w-16">
                   {trend.avg_performance}
                 </span>
                 <span className="w-10 shrink-0 text-right font-semibold tabular-nums text-neutral-200">

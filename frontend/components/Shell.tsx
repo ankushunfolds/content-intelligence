@@ -49,19 +49,26 @@ export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 border-b border-ink-800 bg-ink-950/85 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center gap-6 px-6 py-3.5">
-          <Link href="/dashboard" className="text-sm font-semibold tracking-tight text-white">
-            Content Intelligence
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-3 py-3 sm:gap-6 sm:px-6 sm:py-3.5">
+          <Link
+            href="/dashboard"
+            className="shrink-0 text-sm font-semibold tracking-tight text-white"
+          >
+            <span className="sm:hidden">CI</span>
+            <span className="hidden sm:inline">Content Intelligence</span>
           </Link>
 
-          <nav className="flex items-center gap-1">
+          {/* Scrolls horizontally instead of overflowing the header on
+              narrow screens — four nav items plus the logo and sign-out
+              button don't fit a phone width otherwise. */}
+          <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {NAV.map((item) => {
               const active = pathname === item.href || pathname.startsWith(item.href + "/");
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`rounded-md px-2.5 py-1.5 text-sm transition-colors ${
+                  className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm transition-colors ${
                     active ? "bg-ink-800 text-white" : "text-neutral-500 hover:text-neutral-200"
                   }`}
                 >
@@ -71,14 +78,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-3">
-            {email ? <span className="hidden text-xs text-neutral-600 sm:inline">{email}</span> : null}
+          <div className="ml-auto flex shrink-0 items-center gap-3">
+            {email ? <span className="hidden text-xs text-neutral-600 md:inline">{email}</span> : null}
             <button
               onClick={() => {
                 setToken(null);
                 router.replace("/");
               }}
-              className="text-xs text-neutral-600 hover:text-neutral-300"
+              className="shrink-0 text-xs text-neutral-600 hover:text-neutral-300"
             >
               Sign out
             </button>

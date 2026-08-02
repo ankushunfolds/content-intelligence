@@ -165,36 +165,40 @@ function Dashboard() {
           />
           <div className="panel divide-y divide-ink-800">
             {data.competitor_activity.map((item, index) => (
-              <div key={index} className="flex items-center gap-4 px-4 py-2.5">
-                <div className="w-32 shrink-0 truncate text-xs text-neutral-500">
-                  {item.channel_name}
+              <div key={index} className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-4">
+                <div className="flex min-w-0 items-center gap-2 sm:contents">
+                  <div className="w-24 shrink-0 truncate text-xs text-neutral-500 sm:w-32">
+                    {item.channel_name}
+                  </div>
+                  <a
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="min-w-0 flex-1 truncate text-sm text-neutral-300 hover:text-white"
+                  >
+                    {item.title}
+                  </a>
                 </div>
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="min-w-0 flex-1 truncate text-sm text-neutral-300 hover:text-white"
-                >
-                  {item.title}
-                </a>
-                {item.subtopic ? (
-                  <span className="hidden shrink-0 text-xs text-neutral-600 md:inline">
-                    {item.subtopic}
+                <div className="flex shrink-0 items-center justify-end gap-3 sm:contents">
+                  {item.subtopic ? (
+                    <span className="hidden shrink-0 text-xs text-neutral-600 md:inline">
+                      {item.subtopic}
+                    </span>
+                  ) : null}
+                  <span className="w-12 shrink-0 text-right text-xs tabular-nums text-neutral-500 sm:w-16">
+                    {item.views_display}
                   </span>
-                ) : null}
-                <span className="w-16 shrink-0 text-right text-xs tabular-nums text-neutral-500">
-                  {item.views_display}
-                </span>
-                <span
-                  className={`w-14 shrink-0 text-right text-xs font-medium tabular-nums ${
-                    item.is_breakout ? "text-signal" : "text-neutral-500"
-                  }`}
-                >
-                  {item.performance}
-                </span>
-                <span className="hidden w-16 shrink-0 text-right text-xs text-neutral-700 sm:inline">
-                  {relativeDate(item.published_at)}
-                </span>
+                  <span
+                    className={`w-12 shrink-0 text-right text-xs font-medium tabular-nums sm:w-14 ${
+                      item.is_breakout ? "text-signal" : "text-neutral-500"
+                    }`}
+                  >
+                    {item.performance}
+                  </span>
+                  <span className="hidden w-16 shrink-0 text-right text-xs text-neutral-700 sm:inline">
+                    {relativeDate(item.published_at)}
+                  </span>
+                </div>
               </div>
             ))}
           </div>
