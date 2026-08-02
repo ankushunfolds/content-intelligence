@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { TodayIntelligence } from "@/lib/types";
-import { relativeDate } from "@/lib/format";
+import { narrationSource, relativeDate } from "@/lib/format";
 import { BreakoutVideo } from "@/components/BreakoutVideo";
 import { OpportunityCard } from "@/components/OpportunityCard";
 import { TrendCard } from "@/components/TrendCard";
@@ -64,6 +64,7 @@ function Dashboard() {
   }
 
   const hasSignal = data.opportunities.length > 0 || data.breakouts.length > 0;
+  const narration = narrationSource(data.generated_by);
 
   return (
     <div>
@@ -205,11 +206,15 @@ function Dashboard() {
         </section>
       ) : null}
 
-      <p className="mt-10 text-xs text-neutral-700">
+      {narration.degraded ? (
+        <p className="mt-10 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-200/90">
+          {narration.label}
+        </p>
+      ) : null}
+
+      <p className={`text-xs text-neutral-700 ${narration.degraded ? "mt-3" : "mt-10"}`}>
         Numbers computed from your tracked channels&apos; data.
-        {data.data_mode.llm === "mock"
-          ? " Explanations are template-generated — set an LLM key to enable written analysis."
-          : ` Explanations written by ${data.data_mode.llm} from those numbers.`}
+        {narration.degraded ? "" : ` ${narration.label}`}
       </p>
     </div>
   );

@@ -40,6 +40,42 @@ export function performanceTone(ratio: number | null | undefined): string {
   return "text-neutral-500";
 }
 
+/**
+ * What actually wrote the prose in a brief.
+ *
+ * Read `generated_by` (recorded at generation time), never `data_mode.llm`
+ * — the latter only says whether a provider key is configured, so when the
+ * provider errors and we fall back to templates it still reports "gemini"
+ * and the footer ends up claiming an AI wrote text it didn't. Given the whole
+ * promise here is that the numbers are real and the AI only describes them,
+ * overstating authorship is the one thing not to get wrong.
+ */
+export function narrationSource(generatedBy: string | null | undefined): {
+  label: string;
+  degraded: boolean;
+} {
+  const source = (generatedBy || "").toLowerCase();
+
+  if (source === "mock-fallback") {
+    return {
+      label:
+        "The AI provider was unavailable, so these explanations were written from a template. The numbers are unaffected.",
+      degraded: true,
+    };
+  }
+  if (source === "mock") {
+    return {
+      label: "Explanations are template-generated — no AI provider is configured.",
+      degraded: true,
+    };
+  }
+  if (!source || source === "none") {
+    // Nothing cleared the bar for narration, so there's nothing to attribute.
+    return { label: "", degraded: false };
+  }
+  return { label: `Explanations written by ${generatedBy} from those numbers.`, degraded: false };
+}
+
 export function scoreTone(score: number): string {
   if (score >= 70) return "text-signal";
   if (score >= 45) return "text-rise";

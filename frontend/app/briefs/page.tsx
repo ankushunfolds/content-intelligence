@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { Brief } from "@/lib/types";
-import { relativeDate } from "@/lib/format";
+import { narrationSource, relativeDate } from "@/lib/format";
 import { BreakoutVideo } from "@/components/BreakoutVideo";
 import { OpportunityCard } from "@/components/OpportunityCard";
 import { EmptyState, SectionHeader, Shell } from "@/components/Shell";
@@ -72,6 +72,7 @@ function Briefs() {
 
 function BriefDetail({ brief }: { brief: Brief }) {
   const { content } = brief;
+  const narration = narrationSource(brief.generated_by);
 
   return (
     <div>
@@ -129,9 +130,15 @@ function BriefDetail({ brief }: { brief: Brief }) {
         </section>
       ) : null}
 
-      <p className="mt-8 text-xs text-neutral-700">
-        Generated {new Date(content.generated_at).toLocaleString()} · numbers from the database,
-        wording by {brief.generated_by}.
+      {narration.degraded ? (
+        <p className="mt-8 rounded-lg border border-amber-900/40 bg-amber-950/30 px-3 py-2 text-xs text-amber-200/90">
+          {narration.label}
+        </p>
+      ) : null}
+
+      <p className={`text-xs text-neutral-700 ${narration.degraded ? "mt-3" : "mt-8"}`}>
+        Generated {new Date(content.generated_at).toLocaleString()} · numbers from the database.
+        {narration.degraded ? "" : ` ${narration.label}`}
       </p>
     </div>
   );

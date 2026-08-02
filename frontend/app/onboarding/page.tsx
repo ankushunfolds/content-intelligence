@@ -145,6 +145,12 @@ export default function OnboardingPage() {
               </button>
             ))}
           </div>
+          {/* Say plainly what this does today. It's stored but nothing reads it
+              yet, and implying it tunes the results would be a promise the
+              product doesn't currently keep. */}
+          <p className="mt-2 text-xs text-neutral-600">
+            Saved to your account for upcoming features — it doesn&apos;t affect your scores yet.
+          </p>
         </section>
 
         {error ? <p className="text-sm text-fall">{error}</p> : null}
