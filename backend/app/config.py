@@ -176,6 +176,38 @@ class Settings:
             )
         return problems
 
+    def degraded_modes(self) -> list[str]:
+        """Places the app is serving stand-in data while looking entirely healthy.
+
+        Distinct from startup_problems(), which is fatal in production: nothing
+        here is unsafe, and refusing to boot over it would trade a misleading
+        product for no product at all. But these are not warnings to shrug at.
+        A mock provider returns plausible, well-formed, confident output — it
+        throws nothing, logs nothing, and renders identically to the real
+        thing. That is precisely the shape of the 2 Aug incident, where a
+        retired model routed every brief through MockLLM for hours with no
+        error surfaced to anyone.
+
+        The YouTube case is worse than the LLM one. Seed data means the
+        competitor set, the view counts and the breakout multipliers are all
+        invented, so a user makes real content decisions on fiction. Returned
+        here so /admin/health-summary can report it and the monitor can catch
+        a deploy that quietly came up on defaults.
+        """
+        modes: list[str] = []
+        if not self.using_real_youtube:
+            modes.append(
+                f"YOUTUBE_PROVIDER={self.youtube_provider!r} with "
+                f"{'a key set' if self.youtube_api_key else 'NO api key'} — channel data, view "
+                "counts and breakout multipliers are deterministic seed data, not real YouTube."
+            )
+        if not self.using_real_llm:
+            modes.append(
+                f"LLM_PROVIDER={self.llm_provider!r} — briefs and classifications are "
+                "template-generated, not model-generated."
+            )
+        return modes
+
     @property
     def using_real_youtube(self) -> bool:
         return self.youtube_provider == "youtube" and bool(self.youtube_api_key)

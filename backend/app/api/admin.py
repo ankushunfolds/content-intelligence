@@ -111,6 +111,10 @@ def health_summary(
 
     return {
         "since": since.isoformat(),
+        # Empty is the healthy answer. A non-empty list means the app is up,
+        # erroring on nothing, and serving stand-in data anyway — the failure
+        # mode this whole endpoint exists to catch.
+        "degraded_modes": settings.degraded_modes(),
         "error_count": error_count,
         "errors_by_kind": by_kind,
         "errors_by_status": by_status,

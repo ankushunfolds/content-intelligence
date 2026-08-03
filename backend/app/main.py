@@ -23,6 +23,15 @@ async def lifespan(app: FastAPI):
         for problem in problems:
             logger.warning("config: %s", problem)
 
+    # Not fatal, but loud, and loudest in production — where "the app is up and
+    # every number in it is invented" is a failure mode that otherwise reports
+    # itself as perfectly healthy.
+    for mode in settings.degraded_modes():
+        if settings.is_production:
+            logger.error("DEGRADED: %s", mode)
+        else:
+            logger.info("using stand-in data: %s", mode)
+
     init_db()
     logger.info(
         "started | youtube=%s llm=%s db=%s",
