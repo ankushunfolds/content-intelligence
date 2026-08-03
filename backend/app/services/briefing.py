@@ -178,7 +178,18 @@ def _narrate(db: Session, payload: dict) -> tuple[dict, str]:
     primary = get_llm()
     user_message = json.dumps({"brief": payload}, default=str)
     try:
-        return primary.complete_json(SYSTEM_PROMPT, user_message, model=settings.llm_brief_model), primary.name
+        return (
+            primary.complete_json(
+                SYSTEM_PROMPT,
+                user_message,
+                model=settings.llm_brief_model,
+                # Unlike classification, this one is worth thinking about: the
+                # model has to weigh several competing signals and justify a
+                # recommendation. -1 lets it spend what it needs.
+                thinking_budget=settings.llm_brief_thinking_budget,
+            ),
+            primary.name,
+        )
     except (LLMError, Exception) as exc:
         record_event(db, "llm.failure", f"brief narration fell back to mock: {exc}", level="error")
         return MockLLM().complete_json(SYSTEM_PROMPT, user_message), "mock-fallback"

@@ -147,7 +147,7 @@ def test_classification_prompt_still_specifies_its_json_contract():
     """The f-string conversion must not have eaten the literal JSON braces."""
     from app.services.classification import SYSTEM_PROMPT as CLASSIFY_PROMPT
 
-    assert '{"results":[{"id":<int>' in CLASSIFY_PROMPT
+    assert '{"r":[{"i":<int>' in CLASSIFY_PROMPT
 
 
 def test_brief_prompt_still_specifies_its_json_contract():

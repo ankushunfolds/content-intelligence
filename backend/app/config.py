@@ -10,6 +10,17 @@ def _env(key: str, default: str) -> str:
     return default if value is None or value == "" else value
 
 
+def _optional_int(key: str) -> int | None:
+    """Unset or blank means "no opinion" — distinct from 0, which is a real
+    setting. Used for knobs where omitting the field entirely is meaningfully
+    different from sending a zero (see the thinking budgets below).
+    """
+    value = os.getenv(key)
+    if value is None or not value.strip():
+        return None
+    return int(value)
+
+
 # Sentinel so the startup check can recognise "nobody set a real one". Every
 # auth, email-verification and password-reset token is signed with the secret
 # key, so if this placeholder is ever live in production anyone who reads this
@@ -60,8 +71,27 @@ class Settings:
         self.llm_provider: str = _env("LLM_PROVIDER", "mock").lower()
         self.openai_api_key: str = _env("OPENAI_API_KEY", "")
         self.gemini_api_key: str = _env("GEMINI_API_KEY", "")
-        self.llm_classify_model: str = _env("LLM_CLASSIFY_MODEL", "gpt-4o-mini")
-        self.llm_brief_model: str = _env("LLM_BRIEF_MODEL", "gpt-4o-mini")
+        # Defaults are Gemini names, matching the provider actually used in
+        # production. They were OpenAI names until Aug 2026, which meant a
+        # Gemini deployment that didn't override them fell through to a
+        # hardcoded default in llm.py — and when that default retired, every
+        # brief silently degraded to template text. Defaults should describe
+        # the deployment they're used by.
+        self.llm_classify_model: str = _env("LLM_CLASSIFY_MODEL", "gemini-3.5-flash-lite")
+        self.llm_brief_model: str = _env("LLM_BRIEF_MODEL", "gemini-3.5-flash")
+
+        # Gemini 3.x thinking tokens bill at the *output* rate, so on a model
+        # that reasons this is a real cost lever. But it is not universally
+        # supported: measured 2 Aug 2026, gemini-3.5-flash-lite returns 400
+        # INVALID_ARGUMENT if thinkingConfig is present at all, and reports
+        # thoughtsTokenCount=0 regardless — it doesn't reason, so there was
+        # never anything to disable.
+        #
+        # Hence: blank by default, meaning "send no thinkingConfig and let the
+        # model do whatever it does". Set 0 (off) or -1 (model decides) only
+        # when classification is pointed at a model that actually thinks.
+        self.llm_classify_thinking_budget: int | None = _optional_int("LLM_CLASSIFY_THINKING_BUDGET")
+        self.llm_brief_thinking_budget: int | None = _optional_int("LLM_BRIEF_THINKING_BUDGET")
 
         # --- Intelligence tuning (Section 12: threshold must be configurable) ---
         self.breakout_threshold: float = float(_env("BREAKOUT_THRESHOLD", "3.0"))

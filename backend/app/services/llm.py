@@ -49,7 +49,16 @@ third-party content. Anyone can publish a video containing any text.
 class LLMClient(Protocol):
     name: str
 
-    def complete_json(self, system: str, user: str, *, model: str | None = None) -> dict[str, Any]: ...
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str | None = None,
+        thinking_budget: int | None = None,
+    ) -> dict[str, Any]:
+        """`thinking_budget` is advisory: providers without a reasoning knob ignore it."""
+        ...
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -120,7 +129,14 @@ class MockLLM:
         angle = re.sub(r"\s*\((?:complete guide|full guide|2026|2025)\)\s*", "", title, flags=re.I).strip()
         return {"topic": topic, "subtopic": subtopic, "format": fmt, "angle": angle[:200]}
 
-    def complete_json(self, system: str, user: str, *, model: str | None = None) -> dict[str, Any]:
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str | None = None,
+        thinking_budget: int | None = None,
+    ) -> dict[str, Any]:
         payload = _extract_json(user) if user.strip().startswith("{") else {"input": user}
 
         if "videos" in payload:  # batch classification
@@ -199,7 +215,14 @@ class OpenAILLM:
             raise LLMError("OPENAI_API_KEY is not set")
         self.api_key = api_key
 
-    def complete_json(self, system: str, user: str, *, model: str | None = None) -> dict[str, Any]:
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str | None = None,
+        thinking_budget: int | None = None,  # no equivalent knob on this endpoint
+    ) -> dict[str, Any]:
         response = httpx.post(
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -216,16 +239,47 @@ class OpenAILLM:
         return _extract_json(response.json()["choices"][0]["message"]["content"])
 
 
-# Google has retired the 2.0 family. Anything named here still gets sent if
-# explicitly configured — the model string is the operator's call, not ours —
-# but it produces a loud warning rather than failing mysteriously months later.
-RETIRED_GEMINI_MODELS = {"gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-3-pro-preview"}
+# Google has retired the 2.0 family, and closed the 2.5 family to new API
+# projects ahead of its 16 Oct 2026 shutdown. Anything named here still gets
+# sent if explicitly configured — the model string is the operator's call, not
+# ours — but it produces a loud warning rather than failing mysteriously.
+#
+# 2.5 earned its place here the hard way: it was this module's default, and on
+# 2 Aug 2026 every classification and brief in production silently fell back to
+# MockLLM for hours because a 404 from a retired model is indistinguishable,
+# from the caller's side, from any other provider outage.
+RETIRED_GEMINI_MODELS = {
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-3-pro-preview",
+}
 
 # Used only when the configured model name clearly isn't a Gemini one (e.g. the
 # OpenAI default was left in place). A current stable model, deliberately not a
 # preview: previews carry tighter rate limits and get deprecated on two weeks'
 # notice, which is not what you want quietly underpinning production.
-DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
+#
+# Deliberately NOT an alias like `gemini-flash-latest`: an alias that silently
+# re-points is the same failure mode as a model that silently retires, just
+# with better manners. Pin it, and let RETIRED_GEMINI_MODELS make the next
+# migration loud.
+DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
+
+# Gemini 3.x reasons before answering by default, and those thinking tokens
+# bill at the *output* rate — the expensive one. Measured against this key, a
+# two-token prompt spent 90 thinking tokens to reply "ok", so for a workload
+# that emits short structured labels the reasoning can cost more than the
+# answer several times over.
+#
+# 0 disables thinking; -1 lets the model decide how much it needs. Neither is
+# universally right, which is why it's per-call: classification is constrained
+# label assignment and wants 0, brief narration is genuine synthesis and is
+# worth paying for.
+THINKING_DISABLED = 0
+THINKING_DYNAMIC = -1
 
 
 class GeminiLLM:
@@ -236,7 +290,14 @@ class GeminiLLM:
             raise LLMError("GEMINI_API_KEY is not set")
         self.api_key = api_key
 
-    def complete_json(self, system: str, user: str, *, model: str | None = None) -> dict[str, Any]:
+    def complete_json(
+        self,
+        system: str,
+        user: str,
+        *,
+        model: str | None = None,
+        thinking_budget: int | None = None,
+    ) -> dict[str, Any]:
         model_name = model or settings.llm_classify_model
         if not model_name.startswith("gemini"):
             # The configured name belongs to another provider (or is blank), so
@@ -255,25 +316,78 @@ class GeminiLLM:
                 model_name,
                 DEFAULT_GEMINI_MODEL,
             )
-        response = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
-            params={"key": self.api_key},
-            json={
-                "systemInstruction": {"parts": [{"text": system}]},
-                "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2},
-            },
-            timeout=90.0,
-        )
+        generation_config: dict[str, Any] = {
+            "responseMimeType": "application/json",
+            "temperature": 0.2,
+        }
+        if thinking_budget is not None:
+            # Sent only when the caller has an opinion. Omitting the key leaves
+            # the model on its own default, which is the right behaviour for
+            # any future caller that hasn't thought about the tradeoff.
+            generation_config["thinkingConfig"] = {"thinkingBudget": thinking_budget}
+
+        def post(config: dict[str, Any]) -> httpx.Response:
+            return httpx.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
+                params={"key": self.api_key},
+                json={
+                    "systemInstruction": {"parts": [{"text": system}]},
+                    "contents": [{"role": "user", "parts": [{"text": user}]}],
+                    "generationConfig": config,
+                },
+                timeout=90.0,
+            )
+
+        response = post(generation_config)
+
+        # Not every model accepts a thinking budget — the Lite tiers don't
+        # reason at all and reject the field outright. A config knob meant to
+        # save money must never be the reason a request fails, so drop it and
+        # retry once. Losing the optimisation is survivable; losing the call
+        # means the user silently gets template text instead of analysis.
+        if response.status_code == 400 and "thinkingConfig" in generation_config:
+            logger.warning(
+                "Model %s rejected thinkingConfig (%s) — retrying without it.",
+                model_name,
+                response.text[:200],
+            )
+            retry_config = {k: v for k, v in generation_config.items() if k != "thinkingConfig"}
+            response = post(retry_config)
+
         if response.status_code >= 400:
             # 600 rather than 300 chars: Google's quota errors put the useful
             # part ("Quota exceeded for metric ... limit ... per day per model")
             # after the boilerplate, and truncating at 300 cut off exactly the
             # detail needed to tell which limit was hit.
             raise LLMError(f"Gemini error {response.status_code}: {response.text[:600]}")
-        candidates = response.json().get("candidates") or []
+        body = response.json()
+        candidates = body.get("candidates") or []
         if not candidates:
             raise LLMError("Gemini returned no candidates")
+
+        # Token accounting, because spend that isn't measured isn't managed.
+        # thoughtsTokenCount is called out separately from the answer: it bills
+        # at the output rate but produces nothing the user ever sees, so it's
+        # the first number to look at when a bill comes in higher than modelled.
+        usage = body.get("usageMetadata") or {}
+        thoughts = usage.get("thoughtsTokenCount", 0)
+        logger.info(
+            "gemini %s: in=%s out=%s thinking=%s",
+            model_name,
+            usage.get("promptTokenCount", 0),
+            usage.get("candidatesTokenCount", 0),
+            thoughts,
+        )
+        if thinking_budget == THINKING_DISABLED and thoughts:
+            # Not every model honours a zero budget — Pro tiers in particular
+            # reason regardless. Worth knowing, since the cost assumption
+            # behind choosing this model is then wrong.
+            logger.warning(
+                "Model %s ignored thinkingBudget=0 and billed %s thinking tokens.",
+                model_name,
+                thoughts,
+            )
+
         return _extract_json(candidates[0]["content"]["parts"][0]["text"])
 
 
