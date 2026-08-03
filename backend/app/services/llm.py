@@ -21,7 +21,18 @@ from app.utils.logging import logger
 
 
 class LLMError(Exception):
-    pass
+    """Provider failure, carrying the HTTP status where there was one.
+
+    The status is the whole diagnosis and it used to be buried in a message
+    string. On 3 Aug 2026 a single `llm.failure` event kind covered a retired
+    model (404), an exhausted quota (429) and a capacity blip (503) — three
+    problems needing three different responses, told apart only by reading
+    prose. Callers now attach it to the event so it can be filtered on.
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # Video titles and descriptions come from arbitrary third-party YouTube
@@ -237,7 +248,10 @@ class OpenAILLM:
             timeout=90.0,
         )
         if response.status_code >= 400:
-            raise LLMError(f"OpenAI error {response.status_code}: {response.text[:300]}")
+            raise LLMError(
+                f"OpenAI error {response.status_code}: {response.text[:300]}",
+                status_code=response.status_code,
+            )
         return _extract_json(response.json()["choices"][0]["message"]["content"])
 
 
@@ -433,11 +447,15 @@ class GeminiLLM:
             # part ("Quota exceeded for metric ... limit ... per day per model")
             # after the boilerplate, and truncating at 300 cut off exactly the
             # detail needed to tell which limit was hit.
-            raise LLMError(f"Gemini error {response.status_code}: {response.text[:600]}")
+            raise LLMError(
+                f"Gemini error {response.status_code}: {response.text[:600]}",
+                status_code=response.status_code,
+            )
         body = response.json()
         candidates = body.get("candidates") or []
         if not candidates:
-            raise LLMError("Gemini returned no candidates")
+            # 200 with no candidates: usually a safety block on the response.
+            raise LLMError("Gemini returned no candidates", status_code=response.status_code)
 
         # Token accounting, because spend that isn't measured isn't managed.
         # thoughtsTokenCount is called out separately from the answer: it bills
