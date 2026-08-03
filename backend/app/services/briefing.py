@@ -12,7 +12,7 @@ reads a little flatter.
 from __future__ import annotations
 
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -23,7 +23,7 @@ from app.models import Channel, DailyBrief, TrackedChannel, Trend, Video, VideoI
 from app.services.llm import UNTRUSTED_CONTENT_RULE, LLMError, MockLLM, _suggest_title, get_llm
 from app.services.trends import compute_trends, top_trends
 from app.utils.format import compact_number, multiplier, percent
-from app.utils.logging import record_event
+from app.utils.logging import logger, record_event
 from app.utils.time import utcnow
 
 SYSTEM_PROMPT = f"""You write a daily content-intelligence briefing for a YouTube creator.
@@ -206,6 +206,39 @@ def _narrate(db: Session, payload: dict, user_id: int | None = None) -> tuple[di
         return MockLLM().complete_json(SYSTEM_PROMPT, user_message), "mock-fallback"
 
 
+# Sources that mean "the prose in this brief is template output, not analysis".
+FALLBACK_SOURCES = {"mock", "mock-fallback"}
+
+
+def _degraded_retry_due(brief: DailyBrief) -> bool:
+    """Should we try again on a brief that came out as template text?
+
+    Briefs are cached one per user per day, which is right for cost but means a
+    momentary provider failure is served for up to 24 hours. On 3 Aug a single
+    503 — the kind that clears in seconds — left a user reading template text
+    for the rest of the day. Retrying on read fixes that without a scheduler.
+
+    The cooldown is what makes it safe. Without it, a sustained outage would
+    fire an LLM call on every page load: slowest and most expensive exactly
+    when the provider is already struggling. With it, each user costs at most
+    one attempt per interval, and recovery still happens within minutes.
+    """
+    if brief.generated_by not in FALLBACK_SOURCES:
+        return False
+    if not settings.using_real_llm:
+        return False  # mock is the intended provider here; retrying loops forever
+
+    content = brief.content if isinstance(brief.content, dict) else {}
+    stamp = content.get("generated_at")
+    if not stamp:
+        return True
+    try:
+        generated_at = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return True
+    return utcnow() - generated_at >= timedelta(minutes=settings.brief_degraded_retry_minutes)
+
+
 def generate_brief(db: Session, user_id: int, brief_date: date | None = None, force: bool = False) -> DailyBrief:
     """Build (or rebuild) today's brief. One per user per day."""
     brief_date = brief_date or utcnow().date()
@@ -219,10 +252,17 @@ def generate_brief(db: Session, user_id: int, brief_date: date | None = None, fo
         # generated, serving it verbatim would show confident opportunities
         # and momentum scores for data that no longer exists on their account.
         # Regenerating costs nothing here — no channels means no LLM call.
-        if _competitor_channel_ids(db, user_id):
+        if not _competitor_channel_ids(db, user_id):
+            compute_trends(db, user_id)  # also clears this user's now-orphaned trend rows
+            force = True
+        elif _degraded_retry_due(existing):
+            # Same principle, different defect: this brief is cached but it is
+            # template text, not analysis. Serving it for the rest of the day
+            # because a provider blinked once is not a cache hit worth having.
+            logger.info("brief for user %s is %s — retrying narration", user_id, existing.generated_by)
+            force = True
+        else:
             return existing
-        compute_trends(db, user_id)  # also clears this user's now-orphaned trend rows
-        force = True
 
     # --- 1. Python computes everything factual ---
     opportunities = select_opportunities(db, user_id, settings.max_brief_opportunities)
