@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import User
-from app.utils.security import decode_token
+from app.utils.security import decode_token, token_is_current
 
 
 def current_user(
@@ -15,13 +15,22 @@ def current_user(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Missing bearer token")
 
-    user_id = decode_token(authorization.split(" ", 1)[1].strip())
+    token = authorization.split(" ", 1)[1].strip()
+    user_id = decode_token(token)
     if user_id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
 
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User no longer exists")
+
+    # The signature only proves the token was minted by us, not that it's still
+    # current. This is what makes a password change actually end other sessions.
+    # No extra query: the user row is already loaded above.
+    if not token_is_current(token, user.password_hash):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED, "This session ended because the password changed"
+        )
     return user
 
 

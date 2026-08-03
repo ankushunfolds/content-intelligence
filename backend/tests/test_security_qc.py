@@ -17,6 +17,7 @@ from app.utils.security import (
     decode_token,
     decode_verify_token,
     hash_password,
+    token_is_current,
 )
 
 
@@ -51,8 +52,109 @@ def test_token_purposes_are_not_interchangeable():
     pwd = hash_password("secret123")
     assert decode_token(create_verify_token(1)) is None
     assert decode_token(create_reset_token(1, pwd)) is None
-    assert decode_verify_token(create_token(1)) is None
-    assert decode_reset_token(create_token(1), pwd) is None
+    assert decode_verify_token(create_token(1, pwd)) is None
+    assert decode_reset_token(create_token(1, pwd), pwd) is None
+
+
+# --- Session invalidation ------------------------------------------------
+
+
+def test_changing_password_invalidates_existing_sessions():
+    """A stolen session must not survive a password reset.
+
+    Tokens are stateless, so the only thing tying one to a moment in time is
+    the password fingerprint baked into it.
+    """
+    old = hash_password("original")
+    token = create_token(5, old)
+    assert token_is_current(token, old) is True
+
+    new = hash_password("changed")
+    assert token_is_current(token, new) is False
+
+
+def test_legacy_tokens_without_a_password_claim_are_rejected():
+    """Sessions minted before this protection existed must not be trusted."""
+    import json as _json
+    import time as _time
+
+    from app.utils.security import _b64
+
+    import hashlib as _hashlib
+    import hmac as _hmac
+
+    from app.config import settings as _settings
+
+    legacy = {"sub": 5, "exp": int(_time.time()) + 3600}  # no "pwd"
+    body = _b64(_json.dumps(legacy, separators=(",", ":")).encode())
+    sig = _hmac.new(_settings.secret_key.encode(), body.encode(), _hashlib.sha256).digest()
+    token = f"{body}.{_b64(sig)}"
+
+    # Signature is valid, so it decodes — but it is not a current session.
+    assert decode_token(token) == 5
+    assert token_is_current(token, hash_password("anything")) is False
+
+
+def test_password_reset_ends_the_old_session_end_to_end(client):
+    """The full path: log in, reset the password, old token stops working."""
+    signup = client.post(
+        "/auth/signup", json={"email": "session-test@gmail.com", "password": "original123"}
+    )
+    assert signup.status_code == 201, signup.text
+    old_auth = {"Authorization": f"Bearer {signup.json()['access_token']}"}
+    assert client.get("/auth/me", headers=old_auth).status_code == 200
+
+    from app.db import SessionLocal
+    from app.models import User
+    from sqlalchemy import select as _select
+
+    db = SessionLocal()
+    user = db.scalar(_select(User).where(User.email == "session-test@gmail.com"))
+    reset_token = create_reset_token(user.id, user.password_hash)
+    db.close()
+
+    reset = client.post(
+        "/auth/reset-password", json={"token": reset_token, "password": "brand-new-456"}
+    )
+    assert reset.status_code == 200, reset.text
+
+    # The session issued before the reset must now be refused.
+    assert client.get("/auth/me", headers=old_auth).status_code == 401
+
+    # And the new password issues a session that works.
+    fresh = client.post(
+        "/auth/login", json={"email": "session-test@gmail.com", "password": "brand-new-456"}
+    )
+    assert fresh.status_code == 200, fresh.text
+    new_auth = {"Authorization": f"Bearer {fresh.json()['access_token']}"}
+    assert client.get("/auth/me", headers=new_auth).status_code == 200
+
+
+# --- Prompt injection ----------------------------------------------------
+
+
+def test_prompts_warn_the_model_about_untrusted_video_text():
+    """Titles come from arbitrary third parties, so both prompts must say so."""
+    from app.services.briefing import SYSTEM_PROMPT as BRIEF_PROMPT
+    from app.services.classification import SYSTEM_PROMPT as CLASSIFY_PROMPT
+    from app.services.llm import UNTRUSTED_CONTENT_RULE
+
+    assert UNTRUSTED_CONTENT_RULE in CLASSIFY_PROMPT
+    assert UNTRUSTED_CONTENT_RULE in BRIEF_PROMPT
+
+
+def test_classification_prompt_still_specifies_its_json_contract():
+    """The f-string conversion must not have eaten the literal JSON braces."""
+    from app.services.classification import SYSTEM_PROMPT as CLASSIFY_PROMPT
+
+    assert '{"results":[{"id":<int>' in CLASSIFY_PROMPT
+
+
+def test_brief_prompt_still_specifies_its_json_contract():
+    from app.services.briefing import SYSTEM_PROMPT as BRIEF_PROMPT
+
+    assert '"opportunities": [{"id": <int>' in BRIEF_PROMPT
+    assert '"headline"' in BRIEF_PROMPT
 
 
 def test_reset_token_dies_once_the_password_changes():

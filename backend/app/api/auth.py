@@ -92,7 +92,7 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     # require_email_verification) — the gate applies to *future* logins
     # (see login() below), not to the initial signup, so an unverified user
     # isn't locked out of the app the moment they create their account.
-    return TokenResponse(access_token=create_token(user.id))
+    return TokenResponse(access_token=create_token(user.id, user.password_hash))
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -103,7 +103,7 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Incorrect email or password")
     if settings.require_email_verification and not user.is_verified:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Please verify your email before logging in")
-    return TokenResponse(access_token=create_token(user.id))
+    return TokenResponse(access_token=create_token(user.id, user.password_hash))
 
 
 @router.get("/me", response_model=UserOut)

@@ -20,13 +20,13 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Channel, DailyBrief, TrackedChannel, Trend, Video, VideoIntelligence
-from app.services.llm import LLMError, MockLLM, _suggest_title, get_llm
+from app.services.llm import UNTRUSTED_CONTENT_RULE, LLMError, MockLLM, _suggest_title, get_llm
 from app.services.trends import compute_trends, top_trends
 from app.utils.format import compact_number, multiplier, percent
 from app.utils.logging import record_event
 from app.utils.time import utcnow
 
-SYSTEM_PROMPT = """You write a daily content-intelligence briefing for a YouTube creator.
+SYSTEM_PROMPT = f"""You write a daily content-intelligence briefing for a YouTube creator.
 
 You are given signals that have ALREADY been computed from a database. Your job is
 to explain them, not to produce them.
@@ -40,9 +40,11 @@ Absolute rules:
   topic with the format that is currently working.
 
 Respond with JSON:
-{"headline": "<one sentence, what today is about>",
- "opportunities": [{"id": <int>, "why_it_matters": "...", "suggested_direction": "..."}],
- "competitor_highlights": [{"id": <int>, "why_it_matters": "..."}]}"""
+{{"headline": "<one sentence, what today is about>",
+ "opportunities": [{{"id": <int>, "why_it_matters": "...", "suggested_direction": "..."}}],
+ "competitor_highlights": [{{"id": <int>, "why_it_matters": "..."}}]}}
+
+{UNTRUSTED_CONTENT_RULE}"""
 
 
 def _competitor_channel_ids(db: Session, user_id: int, kind: str | None = None) -> list[int]:

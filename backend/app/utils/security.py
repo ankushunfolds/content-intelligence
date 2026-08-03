@@ -41,21 +41,56 @@ def _unb64(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def create_token(user_id: int) -> str:
-    payload = {"sub": user_id, "exp": int(time.time()) + settings.token_ttl_hours * 3600}
+def password_fingerprint(password_hash: str) -> str:
+    """A short, non-reversible marker tying a token to one password.
+
+    The tail of the stored PBKDF2 digest. It is already a hash, so this leaks
+    nothing useful, but it changes whenever the password changes — which is
+    what lets us invalidate sessions without a server-side session store.
+    """
+    return password_hash[-16:]
+
+
+def create_token(user_id: int, password_hash: str) -> str:
+    payload = {
+        "sub": user_id,
+        "pwd": password_fingerprint(password_hash),
+        "exp": int(time.time()) + settings.token_ttl_hours * 3600,
+    }
     body = _b64(json.dumps(payload, separators=(",", ":")).encode())
     signature = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
     return f"{body}.{_b64(signature)}"
 
 
 def decode_token(token: str) -> int | None:
-    """Return the user id, or None if the token is malformed, forged, or expired."""
+    """Return the user id, or None if the token is malformed, forged, or expired.
+
+    This does NOT prove the session is still current — see `token_is_current`.
+    """
     payload = _decode_signed(token)
     if payload is None or payload.get("purpose") is not None:
         # A verify-email token carries a "purpose" claim (see below) so it
         # can never be replayed as a login/auth token, and vice versa.
         return None
     return int(payload["sub"])
+
+
+def token_is_current(token: str, password_hash: str) -> bool:
+    """Whether this session predates the account's current password.
+
+    Tokens are stateless, so without this a stolen one stays valid for its
+    full lifetime and changing the password does nothing to evict the thief.
+    Binding the token to the password hash means any password change — a
+    reset, or a future "change password" — silently invalidates every session
+    issued before it.
+
+    Tokens minted before this claim existed have no "pwd" and are treated as
+    stale, which forces one clean re-login on deploy.
+    """
+    payload = _decode_signed(token)
+    if payload is None:
+        return False
+    return hmac.compare_digest(payload.get("pwd") or "", password_fingerprint(password_hash))
 
 
 _VERIFY_TOKEN_TTL_HOURS = 24

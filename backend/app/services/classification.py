@@ -11,13 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Channel, Video, VideoIntelligence
-from app.services.llm import LLMError, MockLLM, get_llm
+from app.services.llm import UNTRUSTED_CONTENT_RULE, LLMError, MockLLM, get_llm
 from app.utils.logging import record_event
 from app.utils.time import utcnow
 
 BATCH_SIZE = 20
 
-SYSTEM_PROMPT = """You classify YouTube videos for a content intelligence system.
+SYSTEM_PROMPT = f"""You classify YouTube videos for a content intelligence system.
 
 For each video return:
   topic     - broad category, 1-2 words, reused consistently (e.g. "AI", "Business")
@@ -26,8 +26,10 @@ For each video return:
   angle     - the specific take, under 12 words
 
 Consistency across videos matters more than nuance: prefer an existing label over
-inventing a near-duplicate. Respond with JSON: {"results":[{"id":<int>,"topic":...,
-"subtopic":...,"format":...,"angle":...}]}"""
+inventing a near-duplicate. Respond with JSON: {{"results":[{{"id":<int>,"topic":...,
+"subtopic":...,"format":...,"angle":...}}]}}
+
+{UNTRUSTED_CONTENT_RULE}"""
 
 
 def _pending_videos(db: Session, channel_ids: list[int], limit: int | None = None) -> list[Video]:
