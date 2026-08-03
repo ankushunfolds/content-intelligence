@@ -141,7 +141,16 @@ def classify_videos(db: Session, videos: list[Video]) -> int:
                 thinking_budget=settings.llm_classify_thinking_budget,
             )
         except (LLMError, Exception) as exc:  # degrade rather than fail the pipeline
-            record_event(db, "llm.failure", f"classification fell back to mock: {exc}", level="error")
+            record_event(
+                db,
+                "llm.failure",
+                f"classification fell back to mock: {exc}",
+                level="error",
+                # 404 (retired model) needs a deploy, 429 needs billing, 503
+                # needs nothing at all. Filterable beats grep-the-message.
+                status_code=getattr(exc, "status_code", None),
+                stage="classification",
+            )
             response = fallback.complete_json(SYSTEM_PROMPT, payload)
             source = "mock-fallback"
 

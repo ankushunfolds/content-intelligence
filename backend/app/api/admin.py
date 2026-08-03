@@ -83,25 +83,49 @@ def health_summary(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
     since = utcnow() - timedelta(hours=hours)
-    errors = db.scalars(
-        select(EventLog)
-        .where(EventLog.level == "error", EventLog.created_at >= since)
-        .order_by(EventLog.created_at.desc())
-        .limit(50)
+    in_window = (EventLog.level == "error", EventLog.created_at >= since)
+
+    # Counted in the database rather than by len() on a fetched page. The old
+    # version selected 50 rows and reported that length as error_count, so any
+    # incident past 50 errors silently read as exactly 50 — the check would
+    # under-report precisely when things were worst.
+    error_count = db.scalar(select(func.count(EventLog.id)).where(*in_window)) or 0
+    by_kind = dict(
+        db.execute(
+            select(EventLog.kind, func.count(EventLog.id)).where(*in_window).group_by(EventLog.kind)
+        ).all()
+    )
+
+    recent = db.scalars(
+        select(EventLog).where(*in_window).order_by(EventLog.created_at.desc()).limit(10)
     ).all()
 
-    by_kind: dict[str, int] = {}
-    for e in errors:
-        by_kind[e.kind] = by_kind.get(e.kind, 0) + 1
+    # Status code is the actionable part of an llm.failure: 404 means a model
+    # is gone and needs a deploy, 429 means billing, 503 means wait. Grouping
+    # by it turns "15 llm.failure" into an instruction.
+    by_status: dict[str, int] = {}
+    for event in db.scalars(select(EventLog).where(*in_window)).all():
+        code = (event.meta or {}).get("status_code")
+        if code is not None:
+            by_status[str(code)] = by_status.get(str(code), 0) + 1
 
     return {
         "since": since.isoformat(),
-        "error_count": len(errors),
+        "error_count": error_count,
         "errors_by_kind": by_kind,
+        "errors_by_status": by_status,
         "recent_errors": [
-            {"kind": e.kind, "message": e.message, "created_at": e.created_at.isoformat()}
-            for e in errors[:10]
+            {
+                "kind": e.kind,
+                "message": e.message,
+                "created_at": e.created_at.isoformat(),
+                "meta": e.meta or {},
+            }
+            for e in recent
         ],
         "signups_total": db.scalar(select(func.count(User.id))) or 0,
+        # Retained for continuity, but note this is not a health signal while
+        # email verification is unenforced: users can use the app without it,
+        # so a high unverified share means they skipped a step nothing blocks.
         "signups_unverified": db.scalar(select(func.count(User.id)).where(User.is_verified.is_(False))) or 0,
     }

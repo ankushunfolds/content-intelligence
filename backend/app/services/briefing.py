@@ -173,7 +173,7 @@ def _fallback_headline(opportunities: list[dict], highlights: list[dict], rising
     return "Not enough signal yet — add a few more competitors or wait for the next ingestion run."
 
 
-def _narrate(db: Session, payload: dict) -> tuple[dict, str]:
+def _narrate(db: Session, payload: dict, user_id: int | None = None) -> tuple[dict, str]:
     """Hand the computed signals to the LLM for explanation. Degrades to mock on failure."""
     primary = get_llm()
     user_message = json.dumps({"brief": payload}, default=str)
@@ -191,7 +191,18 @@ def _narrate(db: Session, payload: dict) -> tuple[dict, str]:
             primary.name,
         )
     except (LLMError, Exception) as exc:
-        record_event(db, "llm.failure", f"brief narration fell back to mock: {exc}", level="error")
+        record_event(
+            db,
+            "llm.failure",
+            f"brief narration fell back to mock: {exc}",
+            level="error",
+            status_code=getattr(exc, "status_code", None),
+            stage="brief",
+            # Without this there was no way to tell whose brief degraded, which
+            # matters more here than for classification: a brief is cached for
+            # the day, so the affected user stays degraded until it's cleared.
+            user_id=user_id,
+        )
         return MockLLM().complete_json(SYSTEM_PROMPT, user_message), "mock-fallback"
 
 
@@ -227,7 +238,7 @@ def generate_brief(db: Session, user_id: int, brief_date: date | None = None, fo
 
     # --- 2. The LLM only writes prose over those numbers ---
     if opportunities or highlights:
-        narration, source = _narrate(db, payload)
+        narration, source = _narrate(db, payload, user_id)
     else:
         narration, source = {}, "none"
 
