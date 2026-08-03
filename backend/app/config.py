@@ -101,6 +101,15 @@ class Settings:
         self.llm_max_retries: int = int(_env("LLM_MAX_RETRIES", "2"))
         self.llm_retry_base_delay: float = float(_env("LLM_RETRY_BASE_DELAY", "1.0"))
 
+        # How long a brief that fell back to template text is served before a
+        # read retries the narration. Briefs cache for a day, so without this a
+        # momentary outage is served for up to 24 hours; with it, recovery
+        # takes minutes. The interval is the safety valve — it caps a sustained
+        # outage at one attempt per user per interval instead of one per page
+        # load, which would be slowest and priciest exactly when the provider
+        # is already in trouble.
+        self.brief_degraded_retry_minutes: int = int(_env("BRIEF_DEGRADED_RETRY_MINUTES", "15"))
+
         # --- Intelligence tuning (Section 12: threshold must be configurable) ---
         self.breakout_threshold: float = float(_env("BREAKOUT_THRESHOLD", "3.0"))
         self.trend_window_days: int = int(_env("TREND_WINDOW_DAYS", "7"))
