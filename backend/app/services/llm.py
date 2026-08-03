@@ -9,7 +9,9 @@ explanation. It never produces a statistic (Section 14).
 from __future__ import annotations
 
 import json
+import random
 import re
+import time
 from typing import Any, Protocol
 
 import httpx
@@ -281,6 +283,25 @@ DEFAULT_GEMINI_MODEL = "gemini-3.5-flash"
 THINKING_DISABLED = 0
 THINKING_DYNAMIC = -1
 
+# Worth trying again: the provider is telling us the failure is about capacity
+# or pacing, not about our request. 503 UNAVAILABLE ("spikes in demand are
+# usually temporary") and 429 are explicitly transient; 5xx generally is.
+#
+# 4xx other than 429 is not here on purpose. A 400 or 404 means the request
+# itself is wrong, and repeating it just burns quota to get the same answer.
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """Honour the provider's own pacing advice when it gives any."""
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return None  # HTTP-date form; not worth parsing for a retry hint
+
 
 class GeminiLLM:
     name = "gemini"
@@ -326,7 +347,7 @@ class GeminiLLM:
             # any future caller that hasn't thought about the tradeoff.
             generation_config["thinkingConfig"] = {"thinkingBudget": thinking_budget}
 
-        def post(config: dict[str, Any]) -> httpx.Response:
+        def post_once(config: dict[str, Any]) -> httpx.Response:
             return httpx.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent",
                 params={"key": self.api_key},
@@ -337,6 +358,59 @@ class GeminiLLM:
                 },
                 timeout=90.0,
             )
+
+        def post(config: dict[str, Any]) -> httpx.Response:
+            """Retry transient failures before letting the caller degrade to mock.
+
+            The fallback in classification.py / briefing.py is deliberate and
+            good — a provider outage should never fail a pipeline run. But it
+            is a blunt instrument: it fires on the first error, and because
+            briefs are cached one-per-user-per-day, a single momentary 503
+            leaves that user reading template text until tomorrow. When the
+            provider itself says "spikes in demand are usually temporary", the
+            right response is to wait a second and ask again, not to spend the
+            rest of the day degraded.
+
+            Retries stay deliberately few: classification runs many batches per
+            pipeline run, and a sustained outage shouldn't turn into minutes of
+            sleeping. Failing fast to mock is the correct end state — this only
+            buys back the failures that were never going to persist.
+            """
+            attempts = max(0, settings.llm_max_retries) + 1
+            delay = settings.llm_retry_base_delay
+            response: httpx.Response | None = None
+
+            for attempt in range(1, attempts + 1):
+                try:
+                    response = post_once(config)
+                except httpx.HTTPError as exc:
+                    # Connection reset, read timeout, DNS blip: same character
+                    # as a 503, so treat it the same. On the last attempt let
+                    # it propagate to the caller's existing handler.
+                    if attempt == attempts:
+                        raise
+                    logger.warning(
+                        "Gemini request failed (%s), retry %s/%s in %.1fs",
+                        exc, attempt, attempts - 1, delay,
+                    )
+                else:
+                    if response.status_code not in RETRYABLE_STATUS or attempt == attempts:
+                        return response
+                    hinted = _retry_after_seconds(response)
+                    delay = hinted if hinted is not None else delay
+                    logger.warning(
+                        "Gemini %s on %s, retry %s/%s in %.1fs",
+                        response.status_code, model_name, attempt, attempts - 1, delay,
+                    )
+
+                time.sleep(delay)
+                # Jittered backoff. Classification fires batches in a tight
+                # loop, so without jitter a rate-limited run would retry every
+                # batch in lockstep and hit the same limit together.
+                delay = delay * 2 * (1 + random.uniform(-0.1, 0.1))
+
+            assert response is not None  # loop either returns, raises, or sets this
+            return response
 
         response = post(generation_config)
 

@@ -93,6 +93,14 @@ class Settings:
         self.llm_classify_thinking_budget: int | None = _optional_int("LLM_CLASSIFY_THINKING_BUDGET")
         self.llm_brief_thinking_budget: int | None = _optional_int("LLM_BRIEF_THINKING_BUDGET")
 
+        # Transient-failure retries before degrading to mock output. Kept low
+        # on purpose: a brief is one call and worth waiting a few seconds for,
+        # but classification runs many batches per pipeline run, so generous
+        # retries during a real outage would turn into minutes of sleeping for
+        # a result that was going to fall back anyway.
+        self.llm_max_retries: int = int(_env("LLM_MAX_RETRIES", "2"))
+        self.llm_retry_base_delay: float = float(_env("LLM_RETRY_BASE_DELAY", "1.0"))
+
         # --- Intelligence tuning (Section 12: threshold must be configurable) ---
         self.breakout_threshold: float = float(_env("BREAKOUT_THRESHOLD", "3.0"))
         self.trend_window_days: int = int(_env("TREND_WINDOW_DAYS", "7"))
