@@ -4,13 +4,20 @@ This layer only stores facts. No interpretation happens here (Rule 4).
 """
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Channel, Video
-from app.services.youtube import ChannelData, VideoData, YouTubeProvider, get_provider
+from app.services.youtube import (
+    ChannelData,
+    ChannelNotFound,
+    VideoData,
+    YouTubeProvider,
+    get_provider,
+    parse_identifier,
+)
 from app.utils.logging import record_event
 from app.utils.time import utcnow
 
@@ -65,7 +72,40 @@ def upsert_channel(db: Session, data: ChannelData) -> Channel:
     return channel
 
 
+def _cached_channel(db: Session, identifier: str) -> Channel | None:
+    """A channel we already hold, matched without spending API quota.
+
+    Channels are shared across users, so in a niche cohort the same competitor
+    gets added over and over — and every one of those was a fresh API call,
+    up to 100 quota units each when the URL needed searching. The row is
+    already in the database; re-resolving it buys nothing but a subscriber
+    count that the ingestion pass refreshes anyway.
+
+    Handle matching is case-insensitive because YouTube treats handles that
+    way, and a user pasting `@Handle` should hit the row stored as `handle`.
+    Deliberately no fuzzy matching on channel *name*: two channels can share a
+    display name, and silently tracking the wrong competitor is a far worse
+    outcome than spending a quota unit.
+    """
+    try:
+        kind, value = parse_identifier(identifier)
+    except ChannelNotFound:
+        return None
+
+    if kind == "id":
+        return db.scalar(select(Channel).where(Channel.youtube_channel_id == value))
+    if kind in {"handle", "search"}:
+        # "search" lands here too: a /c/Slug URL is usually the @handle, which
+        # is the same guess the provider makes before paying for a search.
+        return db.scalar(select(Channel).where(func.lower(Channel.handle) == value.lower()))
+    return None
+
+
 def resolve_and_store_channel(db: Session, identifier: str, provider: YouTubeProvider | None = None) -> Channel:
+    cached = _cached_channel(db, identifier)
+    if cached is not None:
+        return cached
+
     provider = provider or get_provider()
     data = provider.resolve_channel(identifier)
     return upsert_channel(db, data)

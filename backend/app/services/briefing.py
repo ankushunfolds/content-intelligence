@@ -197,6 +197,9 @@ def _narrate(db: Session, payload: dict, user_id: int | None = None) -> tuple[di
             f"brief narration fell back to mock: {exc}",
             level="error",
             status_code=getattr(exc, "status_code", None),
+            # Non-HTTP failures (malformed JSON in a 200 body) have no status.
+            # Without this they'd be missing from errors_by_status entirely.
+            failure_reason=getattr(exc, "reason", None),
             stage="brief",
             # Without this there was no way to tell whose brief degraded, which
             # matters more here than for classification: a brief is cached for

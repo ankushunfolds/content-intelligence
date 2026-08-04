@@ -78,6 +78,42 @@ def test_events_without_a_status_code_are_not_counted(client, db):
     assert data["errors_by_status"] == {}
 
 
+def test_non_http_llm_failures_still_appear_in_the_triage_field(client, db):
+    """A 200 response with an unparseable body is a real fault with no status.
+
+    Seen in production 3 Aug 17:17. Keying this dict only on status_code left
+    it empty during that fault, so the monitor's primary triage field read
+    "nothing structural" while looking directly at a structural problem.
+    """
+    record_event(
+        db,
+        "llm.failure",
+        "brief narration fell back to mock: Model returned malformed JSON",
+        level="error",
+        status_code=None,
+        failure_reason="malformed_json",
+        stage="brief",
+    )
+
+    data = _summary(client)
+
+    assert data["error_count"] == 1
+    assert data["errors_by_status"] == {"malformed_json": 1}
+
+
+def test_http_and_non_http_failures_group_side_by_side(client, db):
+    """One field to read, whether or not the failure had a status code."""
+    record_event(db, "llm.failure", "retired", level="error", status_code=404)
+    record_event(db, "llm.failure", "bad body", level="error", failure_reason="malformed_json")
+    record_event(db, "llm.failure", "no object", level="error", failure_reason="no_json_object")
+
+    assert _summary(client)["errors_by_status"] == {
+        "404": 1,
+        "malformed_json": 1,
+        "no_json_object": 1,
+    }
+
+
 def test_window_is_respected(client, db):
     from datetime import timedelta
 

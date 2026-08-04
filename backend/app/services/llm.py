@@ -28,11 +28,32 @@ class LLMError(Exception):
     model (404), an exhausted quota (429) and a capacity blip (503) — three
     problems needing three different responses, told apart only by reading
     prose. Callers now attach it to the event so it can be filtered on.
+
+    Not every failure is an HTTP one, though. A call can return 200 and still
+    be unusable if the body isn't valid JSON — which is exactly what happened
+    on 3 Aug at 17:17. Those carry no status code, so before `reason` existed
+    they were absent from `errors_by_status` entirely and the monitor read
+    "no structural problems" while looking straight at one. `reason` gives
+    non-HTTP failures a stable key so they surface in the same place.
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        reason: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.reason = reason
+
+    @property
+    def failure_key(self) -> str:
+        """How this failure is grouped for triage: the status, or the reason."""
+        if self.status_code is not None:
+            return str(self.status_code)
+        return self.reason or "unknown"
 
 
 # Video titles and descriptions come from arbitrary third-party YouTube
@@ -85,8 +106,20 @@ def _extract_json(text: str) -> dict[str, Any]:
         pass
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if not match:
-        raise LLMError(f"No JSON object in model output: {text[:200]}")
-    return json.loads(match.group(0))
+        raise LLMError(
+            f"No JSON object in model output: {text[:200]}", reason="no_json_object"
+        )
+    try:
+        return json.loads(match.group(0))
+    except json.JSONDecodeError as exc:
+        # A 200 response whose body is truncated or malformed. This used to
+        # escape as a bare JSONDecodeError, which carries no status_code, so
+        # the failure never appeared in errors_by_status and the monitor saw
+        # an empty triage field during a real fault. Wrapping it keeps every
+        # LLM failure reportable through one channel.
+        raise LLMError(
+            f"Model returned malformed JSON: {exc}", reason="malformed_json"
+        ) from exc
 
 
 class MockLLM:

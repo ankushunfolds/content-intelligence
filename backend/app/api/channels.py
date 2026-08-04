@@ -155,6 +155,23 @@ def onboarding(
         tracked_rows.append(tracked)
 
     db.commit()
+
+    # The free tier allows 10,000 units/day and a channel search costs 100, so
+    # a busy onboarding day can exhaust it. Recorded per onboarding rather than
+    # summed at the end of the day, because the useful question when signups
+    # start failing with a 403 is "which shape of URL is burning the budget",
+    # and that is only answerable if the spend is attributed as it happens.
+    units = getattr(provider, "units_used", 0)
+    if units:
+        record_event(
+            db,
+            "youtube.quota",
+            f"resolved {len(tracked_rows)} channels for {units} units",
+            user_id=user.id,
+            units=units,
+            channels=len(tracked_rows),
+        )
+
     if not tracked_rows:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"No channels could be resolved. {'; '.join(failures)}")
 

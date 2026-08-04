@@ -149,6 +149,7 @@ def classify_videos(db: Session, videos: list[Video]) -> int:
                 # 404 (retired model) needs a deploy, 429 needs billing, 503
                 # needs nothing at all. Filterable beats grep-the-message.
                 status_code=getattr(exc, "status_code", None),
+                failure_reason=getattr(exc, "reason", None),
                 stage="classification",
             )
             response = fallback.complete_json(SYSTEM_PROMPT, payload)

@@ -102,14 +102,29 @@ def parse_identifier(raw: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 
+# YouTube Data API v3 charges per call, and wildly unevenly: the free tier is
+# 10,000 units/day and a single search costs 100 of them. Onboarding 50 users
+# whose channel URLs all need searching would spend ~46,000 units — over four
+# times the daily allowance — while the same 50 users onboarded via @handles
+# would spend under 2,000. Same product, 25x the quota, decided entirely by
+# what someone pasted into a form field.
+#
+# Tracked so that quota exhaustion shows up as a number in the event log,
+# rather than as onboarding mysteriously failing with a 403 one afternoon.
+QUOTA_UNITS = {"search": 100}
+DEFAULT_QUOTA_UNITS = 1
+
+
 class RealYouTubeProvider:
     def __init__(self, api_key: str, timeout: float = 20.0) -> None:
         if not api_key:
             raise ProviderError("YOUTUBE_API_KEY is required for the youtube provider")
         self.api_key = api_key
         self.timeout = timeout
+        self.units_used = 0
 
     def _get(self, path: str, **params) -> dict:
+        self.units_used += QUOTA_UNITS.get(path, DEFAULT_QUOTA_UNITS)
         params["key"] = self.api_key
         try:
             response = httpx.get(f"{API_ROOT}/{path}", params=params, timeout=self.timeout)
@@ -129,12 +144,27 @@ class RealYouTubeProvider:
         elif kind == "handle":
             payload = self._get("channels", part="snippet,statistics,contentDetails", forHandle=f"@{value}")
         else:
-            search = self._get("search", part="snippet", q=value, type="channel", maxResults=1)
-            items = search.get("items") or []
-            if not items:
-                raise ChannelNotFound(f"No YouTube channel matched '{identifier}'")
-            channel_id = items[0]["snippet"]["channelId"]
-            payload = self._get("channels", part="snippet,statistics,contentDetails", id=channel_id)
+            # A custom URL slug (/c/Name) or a bare name is very often also the
+            # channel's @handle. forHandle costs 1 unit and search costs 100, so
+            # guessing first is worth it at 100:1 odds: a wrong guess wastes one
+            # unit, a right one saves ninety-nine. It also seeds `handle` in the
+            # database, which lets the next user tracking the same channel skip
+            # the lookup entirely.
+            payload = {}
+            try:
+                payload = self._get(
+                    "channels", part="snippet,statistics,contentDetails", forHandle=f"@{value}"
+                )
+            except ProviderError:
+                payload = {}  # a failed guess must not fail the resolution
+
+            if not (payload.get("items") or []):
+                search = self._get("search", part="snippet", q=value, type="channel", maxResults=1)
+                items = search.get("items") or []
+                if not items:
+                    raise ChannelNotFound(f"No YouTube channel matched '{identifier}'")
+                channel_id = items[0]["snippet"]["channelId"]
+                payload = self._get("channels", part="snippet,statistics,contentDetails", id=channel_id)
 
         items = payload.get("items") or []
         if not items:
@@ -251,6 +281,8 @@ _CHANNEL_NAMES = [
 
 class MockYouTubeProvider:
     """Synthetic YouTube. Same identifier always yields the same channel and videos."""
+
+    units_used = 0  # no API, no quota — present so callers need not special-case
 
     def _seed(self, key: str) -> int:
         return int(hashlib.sha256(key.encode()).hexdigest()[:12], 16)

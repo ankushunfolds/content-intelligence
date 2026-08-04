@@ -103,11 +103,19 @@ def health_summary(
     # Status code is the actionable part of an llm.failure: 404 means a model
     # is gone and needs a deploy, 429 means billing, 503 means wait. Grouping
     # by it turns "15 llm.failure" into an instruction.
+    #
+    # Failures without an HTTP status fall back to their `failure_reason`
+    # (e.g. "malformed_json"), so this field stays the single place to triage
+    # on. Keying only on status_code meant a 200 response with an unparseable
+    # body — a real fault, seen 3 Aug 17:17 — left this dict empty and read as
+    # "nothing structural", which is the opposite of the truth.
     by_status: dict[str, int] = {}
     for event in db.scalars(select(EventLog).where(*in_window)).all():
-        code = (event.meta or {}).get("status_code")
-        if code is not None:
-            by_status[str(code)] = by_status.get(str(code), 0) + 1
+        meta = event.meta or {}
+        code = meta.get("status_code")
+        key = str(code) if code is not None else meta.get("failure_reason")
+        if key:
+            by_status[key] = by_status.get(key, 0) + 1
 
     return {
         "since": since.isoformat(),
