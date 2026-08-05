@@ -7,6 +7,8 @@ works with zero external setup. Once BREVO_API_KEY is set, real emails go out.
 """
 from __future__ import annotations
 
+import html
+
 import httpx
 
 from app.config import settings
@@ -74,6 +76,78 @@ def send_verification_email(to_email: str, token: str) -> None:
     </div>
     """
     _send(to_email, "Verify your Content Intelligence account", html)
+
+
+def _escape(value: object) -> str:
+    """Brief content is derived from third-party video titles, so it reaches
+    this template as untrusted text. The app renders it through React, which
+    escapes automatically; an HTML email has no such protection, so it is
+    escaped explicitly here rather than trusted because it looked fine on-screen.
+    """
+    return html.escape(str(value if value is not None else ""), quote=True)
+
+
+def send_brief_email(to_email: str, content: dict, unsubscribe_token: str) -> None:
+    """The daily brief, delivered. Only called on days that have something to say."""
+    base = settings.frontend_url.rstrip("/")
+    unsubscribe_url = f"{base}/unsubscribe?token={unsubscribe_token}"
+
+    opportunities = (content or {}).get("opportunities") or []
+    blocks = []
+    for index, item in enumerate(opportunities[:3], start=1):
+        projection = item.get("projection") or {}
+        expected = projection.get("expected_views_display")
+        confidence = (item.get("confidence") or {}).get("level")
+
+        meta_bits = [f"{_escape(item.get('momentum'))}/100 momentum"]
+        if expected:
+            meta_bits.append(f"~{_escape(expected)} views on your channel")
+        if confidence and confidence != "solid":
+            meta_bits.append(f"{_escape(confidence)} confidence")
+
+        blocks.append(
+            f"""
+            <div style="margin: 0 0 20px; padding: 16px; border: 1px solid #e5e5e5; border-radius: 8px;">
+              <div style="font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.08em;">
+                {index} · {" · ".join(meta_bits)}
+              </div>
+              <div style="margin-top: 6px; font-size: 16px; font-weight: 600; color: #111;">
+                {_escape(item.get("subtopic") or item.get("topic"))}
+              </div>
+              <p style="margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: #444;">
+                {_escape(item.get("why_it_matters"))}
+              </p>
+              <p style="margin: 10px 0 0; font-size: 14px; color: #111;">
+                &ldquo;{_escape(item.get("suggested_direction"))}&rdquo;
+              </p>
+            </div>
+            """
+        )
+
+    html_body = f"""
+    <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto;">
+      <p style="font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 0.08em;">
+        Today&rsquo;s Intelligence
+      </p>
+      <h2 style="margin: 4px 0 20px; font-size: 18px; line-height: 1.4; color: #111;">
+        {_escape((content or {}).get("headline"))}
+      </h2>
+      {"".join(blocks)}
+      <p style="margin: 24px 0;">
+        <a href="{base}/dashboard"
+           style="background: #111; color: #fff; padding: 12px 20px; border-radius: 6px;
+                  text-decoration: none; font-weight: 600; font-size: 14px;">
+          Open the full brief
+        </a>
+      </p>
+      <p style="color: #999; font-size: 12px; line-height: 1.5;">
+        Every number here is computed from your tracked channels&rsquo; real data.<br>
+        <a href="{unsubscribe_url}" style="color: #999;">Stop receiving these</a>
+      </p>
+    </div>
+    """
+    headline = (content or {}).get("headline") or "Today's intelligence"
+    _send(to_email, f"Today: {headline[:80]}", html_body)
 
 
 def send_password_reset_email(to_email: str, token: str) -> None:

@@ -70,6 +70,10 @@ def today(db: Session = Depends(get_db), user: User = Depends(current_user)) -> 
         "headline": content.get("headline"),
         "brief_date": brief.brief_date.isoformat(),
         "generated_by": brief.generated_by,
+        # Lets the dashboard distinguish "nothing cleared the bar today" from
+        # "we haven't finished collecting your data" — two states that look
+        # identical from an empty opportunities list.
+        "quiet_day": bool(content.get("quiet_day")),
         "opportunities": content.get("opportunities", []),
         "breakouts": content.get("competitor_highlights", []),
         "rising_trends": content.get("rising_trends", []),

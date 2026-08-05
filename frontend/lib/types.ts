@@ -77,6 +77,18 @@ export interface Trend {
   detected_at: string;
 }
 
+export interface Confidence {
+  level: "solid" | "moderate" | "thin";
+  note: string;
+}
+
+export interface Projection {
+  your_baseline: number;
+  your_baseline_display: string | null;
+  expected_views: number;
+  expected_views_display: string | null;
+}
+
 export interface Opportunity {
   id: number;
   trend_id: number;
@@ -86,6 +98,8 @@ export interface Opportunity {
   top_format: string | null;
   why_it_matters: string;
   suggested_direction: string;
+  confidence?: Confidence;
+  projection?: Projection;
   evidence: {
     window_days: number;
     creator_count: number;
@@ -146,6 +160,7 @@ export interface TodayIntelligence {
   headline: string | null;
   brief_date: string;
   generated_by: string;
+  quiet_day?: boolean;
   opportunities: Opportunity[];
   breakouts: Breakout[];
   rising_trends: RisingTrend[];

@@ -25,4 +25,11 @@ class User(Base):
     # Throttles /auth/resend-verification (see api/auth.py) so a user can't
     # hammer the Brevo free-tier quota by re-requesting the same email.
     verification_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Whether the daily brief is emailed. On by default: a daily-cadence
+    # product that has to be remembered mostly isn't. Every email carries an
+    # unsubscribe link that flips this off (see api/briefs.unsubscribe).
+    email_briefs: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Guards against double-sending when the brief job runs more than once in
+    # a day — the scheduler retries, and nobody wants the same brief twice.
+    brief_emailed_on: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)

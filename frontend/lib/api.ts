@@ -140,4 +140,10 @@ export const api = {
   briefs: () => request<Brief[]>("/briefs"),
 
   briefToday: () => request<Brief>("/briefs/today"),
+
+  unsubscribe: (token: string) =>
+    request<{ message: string }>("/briefs/unsubscribe", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    }),
 };

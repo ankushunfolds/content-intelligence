@@ -12,7 +12,7 @@ import { MomentumBar } from "./Metric";
  */
 export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunity; rank: number }) {
   const [showEvidence, setShowEvidence] = useState(false);
-  const { evidence, score_breakdown } = opportunity;
+  const { evidence, score_breakdown, confidence, projection } = opportunity;
 
   return (
     <article className="panel p-5">
@@ -26,9 +26,26 @@ export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunit
             <h3 className="text-base font-semibold text-white">
               {opportunity.subtopic || opportunity.topic}
             </h3>
-            <div className={`text-sm font-semibold tabular-nums ${scoreTone(opportunity.momentum)}`}>
-              {opportunity.momentum}
-              <span className="text-neutral-600">/100</span>
+            <div className="flex items-baseline gap-2">
+              {/* Sitting beside the score rather than buried in the evidence
+                  panel, because it qualifies the number itself: 72 from three
+                  videos and 72 from forty are not the same claim. */}
+              {confidence && confidence.level !== "solid" ? (
+                <span
+                  title={confidence.note}
+                  className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                    confidence.level === "thin"
+                      ? "bg-amber-950/50 text-amber-300/90"
+                      : "bg-ink-800 text-neutral-400"
+                  }`}
+                >
+                  {confidence.level}
+                </span>
+              ) : null}
+              <div className={`text-sm font-semibold tabular-nums ${scoreTone(opportunity.momentum)}`}>
+                {opportunity.momentum}
+                <span className="text-neutral-600">/100</span>
+              </div>
             </div>
           </div>
 
@@ -36,7 +53,26 @@ export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunit
             <MomentumBar score={opportunity.momentum} />
           </div>
 
+          {confidence && confidence.level !== "solid" ? (
+            <p className="mt-1.5 text-xs text-neutral-600">{confidence.note}</p>
+          ) : null}
+
           <p className="mt-3 text-sm leading-relaxed text-neutral-300">{opportunity.why_it_matters}</p>
+
+          {/* "Topics like this run 2.1x" is trivia until it's expressed in the
+              numbers this creator actually recognises. Plain arithmetic on
+              their own median — deliberately not framed as a prediction. */}
+          {projection?.expected_views_display ? (
+            <p className="mt-2 text-sm text-neutral-400">
+              On your channel that&apos;s roughly{" "}
+              <span className="font-semibold text-neutral-100">
+                {projection.expected_views_display} views
+              </span>{" "}
+              <span className="text-neutral-600">
+                (your median is {projection.your_baseline_display})
+              </span>
+            </p>
+          ) : null}
 
           <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3">
             <div className="eyebrow">Possible direction</div>

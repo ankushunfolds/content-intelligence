@@ -47,6 +47,10 @@ class ResetPasswordRequest(BaseModel):
     password: str = Field(min_length=6, max_length=128)
 
 
+class UnsubscribeRequest(BaseModel):
+    token: str
+
+
 # --- Channels ---
 class TrackChannelRequest(BaseModel):
     url: str = Field(description="Channel URL, @handle, or raw UC... id")

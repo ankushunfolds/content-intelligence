@@ -115,6 +115,28 @@ def decode_verify_token(token: str) -> int | None:
     return int(payload["sub"])
 
 
+def create_unsubscribe_token(user_id: int) -> str:
+    """Long-lived by design: it sits in the footer of every brief email, and a
+    link that expires turns "stop emailing me" into "log in and find a setting".
+    Scoped by purpose so it can only ever turn emails off, never authenticate.
+    """
+    payload = {
+        "sub": user_id,
+        "purpose": "unsubscribe",
+        "exp": int(time.time()) + 365 * 24 * 3600,
+    }
+    body = _b64(json.dumps(payload, separators=(",", ":")).encode())
+    signature = hmac.new(settings.secret_key.encode(), body.encode(), hashlib.sha256).digest()
+    return f"{body}.{_b64(signature)}"
+
+
+def decode_unsubscribe_token(token: str) -> int | None:
+    payload = _decode_signed(token)
+    if payload is None or payload.get("purpose") != "unsubscribe":
+        return None
+    return int(payload["sub"])
+
+
 _RESET_TOKEN_TTL_HOURS = 1
 
 

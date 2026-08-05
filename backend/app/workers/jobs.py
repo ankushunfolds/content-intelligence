@@ -10,9 +10,12 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models import Channel, User
 from app.services import briefing, classification, ingestion, performance, trends
+from app.services.email import EmailError, send_brief_email
 from app.services.pipeline import user_channels
 from app.services.youtube import get_provider
-from app.utils.logging import record_event
+from app.utils.logging import logger, record_event
+from app.utils.security import create_unsubscribe_token
+from app.utils.time import utcnow
 
 
 def job_ingest_channels() -> dict:
@@ -54,19 +57,56 @@ def job_compute_trends() -> dict:
 
 
 def job_generate_briefs() -> dict:
-    """Job 4 — one brief per user per day."""
+    """Job 4 — one brief per user per day, emailed if there's anything to say."""
     db = SessionLocal()
     try:
         generated = 0
+        emailed = 0
         for user in db.scalars(select(User)).all():
             if not user_channels(db, user.id):
                 continue
-            briefing.generate_brief(db, user.id, force=True)
+            brief = briefing.generate_brief(db, user.id, force=True)
             generated += 1
-        record_event(db, "job.briefs", f"{generated} briefs generated")
-        return {"briefs": generated}
+            if _email_brief(db, user, brief):
+                emailed += 1
+        record_event(db, "job.briefs", f"{generated} briefs generated, {emailed} emailed")
+        return {"briefs": generated, "emailed": emailed}
     finally:
         db.close()
+
+
+def _email_brief(db, user: User, brief) -> bool:
+    """Send the brief, unless there's a reason not to. Returns whether it sent.
+
+    Four gates, in cheapest-first order. The quiet-day one is the interesting
+    one: an email that arrives every single day whether or not it has anything
+    to say is how a daily product teaches people to ignore it. Silence is what
+    keeps the other mornings worth opening.
+    """
+    content = brief.content if isinstance(brief.content, dict) else {}
+
+    if not user.email_briefs:
+        return False
+    if content.get("quiet_day") or not content.get("opportunities"):
+        return False
+    if brief.generated_by in briefing.FALLBACK_SOURCES:
+        # Template prose is fine to show someone who came looking. Pushing it
+        # into their inbox as today's analysis is a different promise.
+        logger.info("skipping brief email for user %s — narration is %s", user.id, brief.generated_by)
+        return False
+    if user.brief_emailed_on and user.brief_emailed_on.date() == brief.brief_date:
+        return False  # the job already ran today
+
+    try:
+        send_brief_email(user.email, content, create_unsubscribe_token(user.id))
+    except EmailError as exc:
+        record_event(db, "email.failure", f"brief email to user {user.id}: {exc}", level="error", user_id=user.id)
+        return False
+
+    user.brief_emailed_on = utcnow()
+    db.add(user)
+    db.commit()
+    return True
 
 
 def run_daily_cycle() -> dict:

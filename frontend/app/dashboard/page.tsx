@@ -86,7 +86,20 @@ function Dashboard() {
         </button>
       </div>
 
-      {!hasSignal ? (
+      {/* A genuinely quiet niche is a finding, not an error state. Distinct
+          from "no data yet", which means we haven't finished collecting. */}
+      {data.quiet_day && !hasSignal ? (
+        <div className="mt-8">
+          <EmptyState
+            title="Quiet day"
+            body={`Nothing in your niche cleared the bar today. ${
+              data.rising_trends.length
+                ? "A few topics are moving but haven't proven they perform yet — they're listed below."
+                : "No topic is both accelerating and outperforming right now."
+            } That's a real answer: stick to what you had planned.`}
+          />
+        </div>
+      ) : !hasSignal ? (
         <div className="mt-8">
           <EmptyState
             title="No signal yet"

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Channel, DailyBrief, TrackedChannel, Trend, Video, VideoIntelligence
 from app.services.llm import UNTRUSTED_CONTENT_RULE, LLMError, MockLLM, _suggest_title, get_llm
+from app.services.performance import channel_baseline
 from app.services.trends import compute_trends, top_trends
 from app.utils.format import compact_number, multiplier, percent
 from app.utils.logging import logger, record_event
@@ -54,6 +55,44 @@ def _competitor_channel_ids(db: Session, user_id: int, kind: str | None = None) 
     return list(db.scalars(query).all())
 
 
+def own_channel_baseline(db: Session, user_id: int) -> int:
+    """Median views on the user's *own* channel, or 0 if they haven't added one.
+
+    This is what turns a niche-wide statistic into a personal one: "topics like
+    this run 2.1x" is trivia, "expect roughly 25k" is a decision.
+    """
+    own_ids = _competitor_channel_ids(db, user_id, "own")
+    if not own_ids:
+        return 0
+    channel = db.get(Channel, own_ids[0])
+    return channel_baseline(db, channel) if channel is not None else 0
+
+
+# A score built on three videos and one built on forty rendered identically
+# before this, which quietly invites the same trust in both. These thresholds
+# are judgement calls, not statistics — the point is to be visibly less
+# confident when the sample is thin, not to imply a significance test.
+def confidence_for(video_count: int, creator_count: int) -> dict:
+    if video_count >= 12 and creator_count >= 4:
+        return {
+            "level": "solid",
+            "note": f"{video_count} videos across {creator_count} creators.",
+        }
+    if video_count >= 6 and creator_count >= 2:
+        return {
+            "level": "moderate",
+            "note": f"Only {video_count} videos across {creator_count} creators — directional.",
+        }
+    creators = ""
+    if creator_count:
+        plural = "s" if creator_count != 1 else ""
+        creators = f" from {creator_count} creator{plural}"
+    return {
+        "level": "thin",
+        "note": f"Just {video_count} videos{creators} — treat as a hint, not a finding.",
+    }
+
+
 def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
     """Top trends, converted into opportunity records with evidence attached.
 
@@ -67,8 +106,16 @@ def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
         if t.avg_performance >= settings.opportunity_min_performance
     ][:limit]
 
+    baseline = own_channel_baseline(db, user_id)
+
     opportunities = []
     for index, trend in enumerate(candidates):
+        # Projected onto the user's own median rather than reported as an
+        # abstract multiple. Deliberately arithmetic, not a forecast: it says
+        # "a topic performing like this, on a channel your size" — no model
+        # is involved and none should be.
+        expected_views = int(baseline * trend.avg_performance) if baseline else 0
+
         opportunities.append(
             {
                 "id": index,
@@ -77,6 +124,13 @@ def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
                 "subtopic": trend.subtopic,
                 "momentum": trend.trend_score,
                 "top_format": trend.top_format,
+                "confidence": confidence_for(trend.video_count, trend.creator_count),
+                "projection": {
+                    "your_baseline": baseline,
+                    "your_baseline_display": compact_number(baseline) if baseline else None,
+                    "expected_views": expected_views,
+                    "expected_views_display": compact_number(expected_views) if expected_views else None,
+                },
                 "evidence": {
                     "window_days": trend.components.get("window_days", settings.trend_window_days),
                     "creator_count": trend.creator_count,
@@ -152,7 +206,12 @@ def select_rising_trends(db: Session, user_id: int, limit: int) -> list[dict]:
     ]
 
 
-def _fallback_headline(opportunities: list[dict], highlights: list[dict], rising: list[dict] | None = None) -> str:
+def _fallback_headline(
+    opportunities: list[dict],
+    highlights: list[dict],
+    rising: list[dict] | None = None,
+    has_channels: bool = True,
+) -> str:
     if opportunities:
         top = opportunities[0]
         return (
@@ -170,7 +229,13 @@ def _fallback_headline(opportunities: list[dict], highlights: list[dict], rising
             f"{top['subtopic'] or top['topic']} is gaining volume ({top['growth']}) but hasn't "
             f"cleared the performance bar yet — worth watching, not acting on."
         )
-    return "Not enough signal yet — add a few more competitors or wait for the next ingestion run."
+    # Two different silences, and telling a user the wrong one is worse than
+    # saying nothing. With no channels tracked there is no niche to be quiet —
+    # that's an unfinished setup, and "stick to your plan" would be nonsense.
+    if not has_channels:
+        return "Not enough signal yet — add a few competitors to start tracking your niche."
+    # With channels tracked, nothing clearing the bar is a real finding.
+    return "Quiet day in your niche — nothing cleared the bar. Stick to your plan."
 
 
 def _narrate(db: Session, payload: dict, user_id: int | None = None) -> tuple[dict, str]:
@@ -272,11 +337,15 @@ def generate_brief(db: Session, user_id: int, brief_date: date | None = None, fo
     highlights = select_competitor_highlights(db, user_id, settings.max_brief_highlights)
     rising = select_rising_trends(db, user_id, settings.max_brief_trends)
 
+    tracked_channel_ids = _competitor_channel_ids(db, user_id)
+
     payload = {
         "opportunities": opportunities,
         "competitor_highlights": highlights,
         "rising_trends": rising,
-        "headline_fallback": _fallback_headline(opportunities, highlights, rising),
+        "headline_fallback": _fallback_headline(
+            opportunities, highlights, rising, has_channels=bool(tracked_channel_ids)
+        ),
     }
 
     # --- 2. The LLM only writes prose over those numbers ---
@@ -306,11 +375,20 @@ def generate_brief(db: Session, user_id: int, brief_date: date | None = None, fo
     content = {
         "headline": narration.get("headline") or payload["headline_fallback"],
         "generated_at": utcnow().isoformat(),
+        # A day with nothing worth acting on is a real answer, not an empty
+        # page. Most tools in this category manufacture five ideas daily
+        # whether or not five exist, which trains people to ignore all of
+        # them. Saying "quiet week" is what makes a loud day mean something —
+        # and it's also the flag that suppresses the daily email.
+        # Only a *quiet* day if there was somewhere for signal to come from.
+        # An account with no channels isn't quiet, it's unfinished — and it
+        # must not suppress email on the grounds of a calm niche.
+        "quiet_day": bool(tracked_channel_ids) and not opportunities,
         "opportunities": opportunities,
         "competitor_highlights": highlights,
         "rising_trends": rising,
         "stats": {
-            "tracked_channels": len(_competitor_channel_ids(db, user_id)),
+            "tracked_channels": len(tracked_channel_ids),
             "opportunities": len(opportunities),
             "breakouts": len(highlights),
             "trends": len(rising),
