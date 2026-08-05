@@ -35,17 +35,66 @@ def compute_baseline(views: list[int]) -> int:
     return int(statistics.median(clean))
 
 
-def channel_baseline(db: Session, channel: Channel) -> int:
-    videos = db.scalars(select(Video).where(Video.channel_id == channel.id)).all()
+def is_short(video: Video) -> bool:
+    """Whether this is a Short, judged by duration.
+
+    Duration is the only signal the API gives us. YouTube's own Shorts ceiling
+    is 3 minutes, so that's the line. A duration of 0 means the field is
+    missing rather than that the video is instantaneous — those are treated as
+    long-form, which is both the commoner case and the safer error.
+    """
+    return 0 < (video.duration_seconds or 0) <= settings.shorts_max_seconds
+
+
+def _median_of(videos: list[Video]) -> int:
+    """Median views over mature videos, falling back to all of them."""
     if not videos:
         return 0
-
     cutoff = utcnow() - timedelta(days=BASELINE_MIN_AGE_DAYS)
     mature = [v.views for v in videos if v.published_at <= cutoff]
     if len(mature) >= BASELINE_MIN_SAMPLE:
         return compute_baseline(mature)
     # Not enough mature videos yet — fall back to everything rather than nothing.
     return compute_baseline([v.views for v in videos])
+
+
+def channel_baselines(db: Session, channel: Channel) -> dict[str, int]:
+    """Separate medians for Shorts and long-form, plus the pooled fallback.
+
+    Pooling the two was quietly wrong for any channel that posts both, which
+    in 2026 is most of them. Shorts routinely pull an order of magnitude more
+    views than long-form on the same channel, so one median lands between the
+    two clusters and describes neither: every ordinary long-form video reads
+    as a severe underperformer and every ordinary Short reads as a near
+    breakout. The trend engine then inherits both distortions through
+    avg_performance and breakout_rate, skewing recommendations toward whatever
+    topics happen to get covered in Shorts.
+
+    A format bucket too thin to trust falls back to the pooled figure — which
+    is exactly the old behaviour, and is correct for channels that only post
+    one format, where the bucket and the pool are the same videos anyway.
+    """
+    videos = list(db.scalars(select(Video).where(Video.channel_id == channel.id)).all())
+    pooled = _median_of(videos)
+
+    shorts = [v for v in videos if is_short(v)]
+    longform = [v for v in videos if not is_short(v)]
+
+    return {
+        "short": _median_of(shorts) if len(shorts) >= BASELINE_MIN_SAMPLE else pooled,
+        "long": _median_of(longform) if len(longform) >= BASELINE_MIN_SAMPLE else pooled,
+        "pooled": pooled,
+    }
+
+
+def channel_baseline(db: Session, channel: Channel) -> int:
+    """The channel's overall median, ignoring format.
+
+    Retained for callers that want one number for a channel — the competitor
+    list, and the projection of a topic onto the user's own channel. Scoring
+    an individual video must use `channel_baselines` instead.
+    """
+    return _median_of(list(db.scalars(select(Video).where(Video.channel_id == channel.id)).all()))
 
 
 def performance_ratio(views: int, baseline: int) -> float:
@@ -100,14 +149,21 @@ def _intelligence_for(db: Session, video: Video) -> VideoIntelligence:
 
 
 def score_channel(db: Session, channel: Channel, threshold: float | None = None) -> dict:
-    """Recompute performance for every video on one channel."""
-    baseline = channel_baseline(db, channel)
+    """Recompute performance for every video on one channel.
+
+    Each video is measured against the baseline for *its own format*, so a
+    Short is compared with Shorts and a long-form video with long-form.
+    """
+    baselines = channel_baselines(db, channel)
     videos = db.scalars(select(Video).where(Video.channel_id == channel.id)).all()
 
     breakouts = 0
     for video in videos:
+        baseline = baselines["short"] if is_short(video) else baselines["long"]
         ratio = performance_ratio(video.views, baseline)
         intel = _intelligence_for(db, video)
+        # Storing the baseline actually used keeps the audit trail honest:
+        # "3.2x their usual 40k" now names the right 40k.
         intel.baseline_views = baseline
         intel.performance_ratio = ratio
         intel.performance_score = performance_score(ratio)
@@ -117,7 +173,14 @@ def score_channel(db: Session, channel: Channel, threshold: float | None = None)
             breakouts += 1
 
     db.commit()
-    return {"channel_id": channel.id, "baseline": baseline, "videos": len(videos), "breakouts": breakouts}
+    return {
+        "channel_id": channel.id,
+        "baseline": baselines["pooled"],
+        "baseline_short": baselines["short"],
+        "baseline_long": baselines["long"],
+        "videos": len(videos),
+        "breakouts": breakouts,
+    }
 
 
 def score_channels(db: Session, channels: list[Channel], threshold: float | None = None) -> dict:

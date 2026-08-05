@@ -112,6 +112,10 @@ class Settings:
 
         # --- Intelligence tuning (Section 12: threshold must be configurable) ---
         self.breakout_threshold: float = float(_env("BREAKOUT_THRESHOLD", "3.0"))
+        # Videos at or under this length are treated as Shorts and scored
+        # against a separate baseline. 180s matches YouTube's own Shorts
+        # ceiling. Duration is the only format signal the API gives us.
+        self.shorts_max_seconds: int = int(_env("SHORTS_MAX_SECONDS", "180"))
         self.trend_window_days: int = int(_env("TREND_WINDOW_DAYS", "7"))
         self.min_videos_for_trend: int = int(_env("MIN_VIDEOS_FOR_TREND", "3"))
         self.max_brief_opportunities: int = int(_env("MAX_BRIEF_OPPORTUNITIES", "5"))
