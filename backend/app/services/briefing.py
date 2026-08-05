@@ -83,6 +83,18 @@ def confidence_for(video_count: int, creator_count: int) -> dict:
             "level": "moderate",
             "note": f"Only {video_count} videos across {creator_count} creators — directional.",
         }
+    # Name the actual weakness. "Just 40 videos" is nonsense when the real
+    # problem is that all 40 came from one channel — that isn't a thin sample,
+    # it's a single creator's hobby horse, and the two need different wording
+    # or the note undermines the number it's meant to qualify.
+    if creator_count <= 1 and video_count >= 6:
+        return {
+            "level": "thin",
+            "note": (
+                f"All {video_count} videos come from a single creator — that's one channel's "
+                "focus, not a trend across your niche."
+            ),
+        }
     creators = ""
     if creator_count:
         plural = "s" if creator_count != 1 else ""
@@ -130,6 +142,11 @@ def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
 
     baseline = own_channel_baseline(db, user_id)
     covered = own_channel_topics(db, user_id)
+    # An empty set means we have no idea what they cover — no own channel, or
+    # nothing classified yet — not that they've covered nothing. Without this
+    # every single topic gets flagged as a gap, which is a confident claim
+    # built on missing data.
+    gaps_knowable = bool(covered)
 
     opportunities = []
     for index, trend in enumerate(candidates):
@@ -151,8 +168,10 @@ def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
                 "saturation": trend.components.get("saturation") or {"level": "open", "note": ""},
                 "formats": trend.components.get("formats") or [],
                 # "Six competitors covered this, you never have" is a stronger
-                # recommendation than the same topic you already post about.
-                "is_gap": (trend.subtopic or trend.topic).strip().lower() not in covered,
+                # recommendation than the same topic you already post about —
+                # but only claim it when we actually know what they cover.
+                "is_gap": gaps_knowable
+                and (trend.subtopic or trend.topic).strip().lower() not in covered,
                 "projection": {
                     "your_baseline": baseline,
                     "your_baseline_display": compact_number(baseline) if baseline else None,
@@ -458,11 +477,20 @@ def generate_brief(db: Session, user_id: int, brief_date: date | None = None, fo
     return brief
 
 
+def _plural(count: int, noun: str) -> str:
+    """"1 creators published 1 videos" appeared verbatim in production whenever
+    the LLM degraded to this fallback. Small, but it's the sentence a user
+    reads on exactly the days the product is already underperforming."""
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def _evidence_sentence(opportunity: dict) -> str:
     """Deterministic fallback explanation — still evidence-first, just not prose-polished."""
     ev = opportunity["evidence"]
+    creators = _plural(ev["creator_count"], "tracked creator")
+    videos = _plural(ev["video_count"], "video")
     return (
-        f"{ev['creator_count']} tracked creators published {ev['video_count']} videos on "
+        f"{creators} published {videos} on "
         f"{opportunity['subtopic'] or opportunity['topic']} in the last {ev['window_days']} days "
         f"({ev['volume_growth_pct']} vs the prior window), averaging {ev['avg_performance']} "
         f"their creators' median views."

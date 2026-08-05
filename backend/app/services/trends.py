@@ -241,7 +241,16 @@ def compute_trends(db: Session, user_id: int, window_days: int | None = None) ->
             continue  # too thin to call a trend
 
         prior_count = len(window.prior_videos)
-        ratios = [r["ratio"] for r in window.recent_videos if r["ratio"] > 0]
+
+        # A video whose channel has no usable baseline yet scores 0.0, which
+        # means "unknown", not "flopped". Those are excluded from the average
+        # — and must be excluded from the breakout rate too, or the two
+        # signals describe different populations: performance measured on the
+        # scored videos, breakout rate diluted by the unscored ones. That
+        # silently under-reports breakouts on newly-added channels, exactly
+        # when a user is first forming an opinion of the product.
+        scored = [r for r in window.recent_videos if r["ratio"] > 0]
+        ratios = [r["ratio"] for r in scored]
         avg_performance = round(statistics.mean(ratios), 3) if ratios else 0.0
 
         # +100% when the topic appeared from nothing; symmetric otherwise.
@@ -249,8 +258,8 @@ def compute_trends(db: Session, user_id: int, window_days: int | None = None) ->
             round((recent_count - prior_count) / prior_count, 3) if prior_count else 1.0
         )
         creator_count = len({r["channel"].id for r in window.recent_videos})
-        breakouts = sum(1 for r in window.recent_videos if r["intel"].is_breakout)
-        breakout_rate = breakouts / recent_count
+        breakouts = sum(1 for r in scored if r["intel"].is_breakout)
+        breakout_rate = breakouts / len(scored) if scored else 0.0
         velocity = round(recent_count / window_days, 3)
 
         ages = [
