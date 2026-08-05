@@ -24,11 +24,12 @@ from app.utils.time import utcnow
 # Each weight says: how much does this signal matter in deciding "is this worth
 # the creator's attention?". They sum to 1.0.
 WEIGHTS = {
-    "performance": 0.30,  # is the topic actually outperforming?
-    "volume_growth": 0.25,  # is it accelerating vs the prior window?
-    "creator_adoption": 0.20,  # is it broad, or one creator's hobby horse?
-    "breakout_rate": 0.15,  # is it producing outliers?
-    "velocity": 0.10,  # raw publishing rate
+    "performance": 0.28,  # is the topic actually outperforming?
+    "volume_growth": 0.22,  # is it accelerating vs the prior window?
+    "creator_adoption": 0.18,  # is it broad, or one creator's hobby horse?
+    "breakout_rate": 0.14,  # is it producing outliers?
+    "recency": 0.10,  # is the activity now, or already over?
+    "velocity": 0.08,  # raw publishing rate
 }
 
 # The value of a raw signal at which its normalised contribution saturates at 1.0.
@@ -37,8 +38,53 @@ SATURATION = {
     "volume_growth": 1.0,  # +100% vs prior window
     "creator_adoption": 8.0,  # 8 distinct creators
     "breakout_rate": 0.4,  # 40% of videos are breakouts
+    "recency": 1.0,  # already a 0–1 share; see recency_share()
     "velocity": 2.0,  # 2 videos/day
 }
+
+
+def recency_share(ages_in_days: list[float], window_days: int) -> float:
+    """What share of the window's activity happened in its *newer* half.
+
+    Every video in the window counted equally before this, so a topic that
+    spiked six days ago and has since gone silent scored identically to one
+    accelerating this morning — while the product's entire claim is that
+    "rising" means rising. 0.5 is an evenly spread topic, above that is
+    accelerating, below it is fading.
+
+    Deliberately a share rather than an exponential decay: it survives being
+    explained in one sentence in the score breakdown, which matters more here
+    than a smoother curve.
+    """
+    if not ages_in_days or window_days <= 0:
+        return 0.0
+    midpoint = window_days / 2
+    newer = sum(1 for age in ages_in_days if age <= midpoint)
+    return newer / len(ages_in_days)
+
+
+def saturation_for(creator_count: int, volume_growth: float) -> dict:
+    """Whether a topic still has room, or everyone already got there.
+
+    The signal nobody ships. Every tool in this category reports what is
+    rising; none warn that a topic is crowded and cooling, which is exactly
+    when acting on it costs the most and returns the least.
+    """
+    crowded = creator_count >= 5
+    if crowded and volume_growth <= 0:
+        return {
+            "level": "crowded",
+            "note": (
+                f"{creator_count} creators are already on this and volume is no longer growing "
+                "— likely too late to be early."
+            ),
+        }
+    if crowded and volume_growth < 0.25:
+        return {
+            "level": "filling",
+            "note": f"{creator_count} creators are covering this and growth is slowing.",
+        }
+    return {"level": "open", "note": ""}
 
 
 @dataclass
@@ -69,13 +115,19 @@ def score_components(
     creator_count: int,
     breakout_rate: float,
     velocity: float,
+    recency: float = 0.5,
 ) -> tuple[int, dict]:
-    """Combine the five signals into a 0–100 score plus a full audit trail."""
+    """Combine the signals into a 0–100 score plus a full audit trail.
+
+    `recency` defaults to 0.5 — an evenly spread topic — so a caller that
+    doesn't supply it is treated as neutral rather than as one that died.
+    """
     raw = {
         "performance": avg_performance,
         "volume_growth": volume_growth,
         "creator_adoption": float(creator_count),
         "breakout_rate": breakout_rate,
+        "recency": recency,
         "velocity": velocity,
     }
 
@@ -93,6 +145,35 @@ def score_components(
         }
 
     return int(round(total * 100)), breakdown
+
+
+def _format_performance(records: list[dict], min_sample: int = 2) -> list[dict]:
+    """How each format performed *within* this topic, best first.
+
+    `top_format` only ever said which format was most common, which is a
+    popularity contest — the useful question is which one worked. Formats
+    below `min_sample` are dropped rather than reported: one video is an
+    anecdote, and presenting it beside a real average would imply otherwise.
+    """
+    by_format: dict[str, list[float]] = {}
+    for record in records:
+        name = record["intel"].format
+        ratio = record["ratio"]
+        if not name or ratio <= 0:
+            continue
+        by_format.setdefault(name, []).append(ratio)
+
+    rows = [
+        {
+            "format": name,
+            "video_count": len(ratios),
+            "avg_performance": round(statistics.mean(ratios), 3),
+        }
+        for name, ratios in by_format.items()
+        if len(ratios) >= min_sample
+    ]
+    rows.sort(key=lambda row: row["avg_performance"], reverse=True)
+    return rows
 
 
 def _tracked_channel_ids(db: Session, user_id: int) -> list[int]:
@@ -172,16 +253,24 @@ def compute_trends(db: Session, user_id: int, window_days: int | None = None) ->
         breakout_rate = breakouts / recent_count
         velocity = round(recent_count / window_days, 3)
 
+        ages = [
+            max(0.0, (now - r["video"].published_at).total_seconds() / 86400)
+            for r in window.recent_videos
+        ]
+        recency = round(recency_share(ages, window_days), 3)
+
         score, breakdown = score_components(
             avg_performance=avg_performance,
             volume_growth=volume_growth,
             creator_count=creator_count,
             breakout_rate=breakout_rate,
             velocity=velocity,
+            recency=recency,
         )
 
         formats = [r["intel"].format for r in window.recent_videos if r["intel"].format]
         top_format = statistics.mode(formats) if formats else None
+        format_breakdown = _format_performance(window.recent_videos)
 
         trend = Trend(
             user_id=user_id,
@@ -201,6 +290,13 @@ def compute_trends(db: Session, user_id: int, window_days: int | None = None) ->
                 "prior_videos": prior_count,
                 "weights": WEIGHTS,
                 "signals": breakdown,
+                # "Everyone is already here and it's cooling" — the warning
+                # that stops a recommendation being acted on too late.
+                "saturation": saturation_for(creator_count, volume_growth),
+                # Which format is actually working, not just which is most
+                # common: the same topic can be a hit as an experiment and a
+                # dud as a tutorial.
+                "formats": format_breakdown,
             },
             detected_at=now,
         )

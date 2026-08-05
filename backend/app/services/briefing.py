@@ -93,6 +93,28 @@ def confidence_for(video_count: int, creator_count: int) -> dict:
     }
 
 
+def own_channel_topics(db: Session, user_id: int, days: int = 90) -> set[str]:
+    """Subtopics the user has published on themselves, lower-cased.
+
+    Used to separate "this is working in your niche" from "this is working in
+    your niche and you have never touched it" — the second is a materially
+    stronger recommendation, and the data to tell them apart was already here.
+    """
+    own_ids = _competitor_channel_ids(db, user_id, "own")
+    if not own_ids:
+        return set()
+
+    cutoff = utcnow() - timedelta(days=days)
+    rows = db.execute(
+        select(VideoIntelligence.subtopic)
+        .join(Video, Video.id == VideoIntelligence.video_id)
+        .where(Video.channel_id.in_(own_ids))
+        .where(Video.published_at >= cutoff)
+        .where(VideoIntelligence.subtopic.is_not(None))
+    ).all()
+    return {row[0].strip().lower() for row in rows if row[0]}
+
+
 def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
     """Top trends, converted into opportunity records with evidence attached.
 
@@ -107,6 +129,7 @@ def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
     ][:limit]
 
     baseline = own_channel_baseline(db, user_id)
+    covered = own_channel_topics(db, user_id)
 
     opportunities = []
     for index, trend in enumerate(candidates):
@@ -125,6 +148,11 @@ def select_opportunities(db: Session, user_id: int, limit: int) -> list[dict]:
                 "momentum": trend.trend_score,
                 "top_format": trend.top_format,
                 "confidence": confidence_for(trend.video_count, trend.creator_count),
+                "saturation": trend.components.get("saturation") or {"level": "open", "note": ""},
+                "formats": trend.components.get("formats") or [],
+                # "Six competitors covered this, you never have" is a stronger
+                # recommendation than the same topic you already post about.
+                "is_gap": (trend.subtopic or trend.topic).strip().lower() not in covered,
                 "projection": {
                     "your_baseline": baseline,
                     "your_baseline_display": compact_number(baseline) if baseline else None,

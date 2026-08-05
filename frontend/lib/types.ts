@@ -89,6 +89,17 @@ export interface Projection {
   expected_views_display: string | null;
 }
 
+export interface Saturation {
+  level: "open" | "filling" | "crowded";
+  note: string;
+}
+
+export interface FormatPerformance {
+  format: string;
+  video_count: number;
+  avg_performance: number;
+}
+
 export interface Opportunity {
   id: number;
   trend_id: number;
@@ -100,6 +111,9 @@ export interface Opportunity {
   suggested_direction: string;
   confidence?: Confidence;
   projection?: Projection;
+  saturation?: Saturation;
+  formats?: FormatPerformance[];
+  is_gap?: boolean;
   evidence: {
     window_days: number;
     creator_count: number;

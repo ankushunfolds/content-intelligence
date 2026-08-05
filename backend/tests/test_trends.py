@@ -31,14 +31,46 @@ def test_normalisation_is_clamped():
 
 
 def test_score_is_bounded():
+    """Every signal at its floor scores 0; every signal maxed scores 100.
+
+    `recency` is passed explicitly here: its default is 0.5 (neutral, for
+    callers with no age data), so relying on the default would leave the
+    "everything is dead" case scoring 5 rather than 0.
+    """
     low = score_components(
-        avg_performance=0.0, volume_growth=-1.0, creator_count=0, breakout_rate=0.0, velocity=0.0
+        avg_performance=0.0,
+        volume_growth=-1.0,
+        creator_count=0,
+        breakout_rate=0.0,
+        velocity=0.0,
+        recency=0.0,
     )[0]
     high = score_components(
-        avg_performance=10.0, volume_growth=5.0, creator_count=50, breakout_rate=1.0, velocity=10.0
+        avg_performance=10.0,
+        volume_growth=5.0,
+        creator_count=50,
+        breakout_rate=1.0,
+        velocity=10.0,
+        recency=1.0,
     )[0]
     assert low == 0
     assert high == 100
+
+
+def test_unsupplied_recency_is_neutral_not_zero():
+    """A caller without age data must not be penalised as though the topic died."""
+    neutral = score_components(
+        avg_performance=2.0, volume_growth=0.5, creator_count=4, breakout_rate=0.2, velocity=1.0
+    )[0]
+    explicit = score_components(
+        avg_performance=2.0,
+        volume_growth=0.5,
+        creator_count=4,
+        breakout_rate=0.2,
+        velocity=1.0,
+        recency=0.5,
+    )[0]
+    assert neutral == explicit
 
 
 def test_score_is_deterministic():

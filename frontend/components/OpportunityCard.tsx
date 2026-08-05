@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Opportunity } from "@/lib/types";
-import { scoreTone } from "@/lib/format";
+import { multiplier, scoreTone } from "@/lib/format";
 import { MomentumBar } from "./Metric";
 
 /**
@@ -12,7 +12,8 @@ import { MomentumBar } from "./Metric";
  */
 export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunity; rank: number }) {
   const [showEvidence, setShowEvidence] = useState(false);
-  const { evidence, score_breakdown, confidence, projection } = opportunity;
+  const { evidence, score_breakdown, confidence, projection, saturation, formats, is_gap } =
+    opportunity;
 
   return (
     <article className="panel p-5">
@@ -23,8 +24,15 @@ export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunit
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-            <h3 className="text-base font-semibold text-white">
+            <h3 className="flex flex-wrap items-center gap-2 text-base font-semibold text-white">
               {opportunity.subtopic || opportunity.topic}
+              {/* A topic you've never touched is a stronger recommendation
+                  than one you already post about. */}
+              {is_gap ? (
+                <span className="rounded bg-signal/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-signal">
+                  Gap
+                </span>
+              ) : null}
             </h3>
             <div className="flex items-baseline gap-2">
               {/* Sitting beside the score rather than buried in the evidence
@@ -72,6 +80,33 @@ export function OpportunityCard({ opportunity, rank }: { opportunity: Opportunit
                 (your median is {projection.your_baseline_display})
               </span>
             </p>
+          ) : null}
+
+          {/* The warning nobody else ships: crowded and cooling means acting
+              on this now costs the most and returns the least. */}
+          {saturation && saturation.level !== "open" ? (
+            <p
+              className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
+                saturation.level === "crowded"
+                  ? "border-amber-900/40 bg-amber-950/30 text-amber-200/90"
+                  : "border-ink-700 bg-ink-950/60 text-neutral-400"
+              }`}
+            >
+              {saturation.note}
+            </p>
+          ) : null}
+
+          {/* Which format actually worked, not merely which was most common. */}
+          {formats && formats.length > 1 ? (
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
+              {formats.slice(0, 3).map((row) => (
+                <span key={row.format}>
+                  <span className="text-neutral-300">{row.format}</span>{" "}
+                  {multiplier(row.avg_performance)}
+                  <span className="text-neutral-700"> ({row.video_count})</span>
+                </span>
+              ))}
+            </div>
           ) : null}
 
           <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3">
